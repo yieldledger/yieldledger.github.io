@@ -12,8 +12,11 @@ async def shoot(pg, name, sel=None, pad=12):
     if sel:
         el = pg.locator(sel).first
         await el.scroll_into_view_if_needed()
+        await pg.evaluate("document.querySelectorAll('.topbar').forEach(e => e.style.position = 'static')")
+        await el.scroll_into_view_if_needed()
         box = await el.bounding_box()
         vw = pg.viewport_size["width"]
+        box["height"] = min(box["height"], pg.viewport_size["height"] * 1.5)
         await pg.screenshot(path=str(OUT / f"{name}.png"), full_page=True,
                             clip={"x": 0, "y": max(0, box["y"] - pad + await pg.evaluate("scrollY")), "width": vw, "height": box["height"] + 2 * pad})
     else:
