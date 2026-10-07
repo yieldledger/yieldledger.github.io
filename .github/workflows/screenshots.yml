@@ -1,0 +1,31 @@
+name: Screenshots
+# Takes marketing screenshots of the demo with the latest market data and saves them to the "screenshots" branch.
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  shoot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v4
+        with:
+          path: site/data
+          key: market-data-${{ github.run_id }}
+          restore-keys: market-data-
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install playwright==1.48.0
+          python -m playwright install --with-deps chromium
+          python scripts/screenshots.py site shots
+      - name: Save to the screenshots branch
+        run: |
+          cd shots
+          git init -q -b screenshots
+          git config user.name "Yield Ledger"; git config user.email "hello@yieldledger.invalid"
+          git add -A && git commit -q -m "Screenshots"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" screenshots
