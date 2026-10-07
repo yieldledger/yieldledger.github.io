@@ -710,5 +710,6 @@ export const FR = {
  "Write a few words first.": "Écrivez d’abord quelques mots.",
  "Thank you. Your feedback was sent.": "Merci. Votre commentaire a été envoyé.",
  "Could not send it: {e}. Please try again in a moment.": "Envoi impossible : {e}. Réessayez dans un moment.",
- "Close this window": "Fermer cette fenêtre"
+ "Close this window": "Fermer cette fenêtre",
+ "uses leverage": "utilise l’effet de levier"
 };

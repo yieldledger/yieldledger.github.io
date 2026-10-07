@@ -660,7 +660,7 @@ function holdersOf(key) {
     for (const [hs, hn, w] of r.h || []) {
       const hb = baseSym(String(hs).toUpperCase());
       const hit = key.sym ? (hb === key.sym || hb === key.sym.replace('-', '.') || hb === key.sym.replace(/^GOOGL$/, 'GOOG')) : String(hn || '').toLowerCase().includes(key.text);
-      if (hit && !(w === 0)) { out.push({ r, w, hn }); break; }
+      if (hit && !(w === 0)) { out.push({ r, w, hn, lev: w > 1 }); break; }
     }
   }
   return out.sort((a, b) => (b.w || 0) - (a.w || 0));
@@ -712,7 +712,8 @@ function waysToOwn(key, holders) {
   if (ca) opts.push([ca, t('Canadian listing'), t('Priced in CAD. No withholding on Canadian dividends.')]);
   if (direct) opts.push([direct, t('US listing'), t('Pay in USD: from a CAD account at Wealthsimple that is a {f} conversion each way. In an RRSP, no US withholding on dividends.', { f: pct(E.FX_FEE, 1) })]);
   if (cdr) opts.push([cdr, t('CDR on Cboe Canada'), t('Priced in CAD with no currency conversion and a built-in currency hedge. 15% US withholding on dividends in every account, RRSP included.')]);
-  if (holders.length) opts.push([null, t('Through an ETF'), t('{n} tracked ETFs hold it. The biggest weight is {s} at {w}.', { n: holders.length, s: esc(holders[0].r.d), w: pct(holders[0].w, 1) })]);
+  const top1 = holders.find(h => (h.w || 0) <= 1) || holders[0];
+  if (holders.length) opts.push([null, t('Through an ETF'), t('{n} tracked ETFs hold it. The biggest weight is {s} at {w}.', { n: holders.length, s: esc(top1.r.d), w: pct(top1.w, 1) })]);
   if (!opts.length) return '';
   const divNote = (direct || cdr) && !((direct || cdr).y > 0) ? `<p class="muted" style="margin:0;font-size:13px">${t('{n} pays no dividend, so withholding tax does not affect it; the currency conversion still does.', { n: esc(name) })}</p>` : '';
   return `<section class="panel stack own"><h2 style="font-size:19px">${t('Ways to own {n} from Canada', { n: esc(name) })}</h2>
@@ -754,7 +755,7 @@ function viewResearch() {
         holders.forEach(h => (h.r._w = h.w));
         const rows = sortRows(holders.map(h => h.r), 'w');
         html += `<div class="sec-head"><h2>${t('ETFs that hold {n}', { n: esc(holders[0].hn || key.label) })}</h2><span class="muted" style="font-size:13px">${t('From each fund’s top 10 holdings')}</span></div>${statStrip(rows, t('Funds'))}
-          <div class="tbl-wrap"><table class="tbl">${head(`<th><button data-sort="w">${t('Weight')}${RS.sort === 'w' ? (RS.dir < 0 ? ' ↓' : ' ↑') : ''}</button></th>`)}<tbody>${limited(rows).map(r => `<tr class="link" data-href="#/t/${encodeURIComponent(r.s)}">${rowCells(r, `<td><b>${pct(r._w, 1)}</b>${(S.rows.find(x => x.s === r.s) || {}).hp ? `<small>${t('via {p}', { p: esc(r.hp) })}</small>` : ''}</td>`)}</tr>`).join('')}</tbody></table></div>${moreBtn(rows)}`;
+          <div class="tbl-wrap"><table class="tbl">${head(`<th><button data-sort="w">${t('Weight')}${RS.sort === 'w' ? (RS.dir < 0 ? ' ↓' : ' ↑') : ''}</button></th>`)}<tbody>${limited(rows).map(r => `<tr class="link" data-href="#/t/${encodeURIComponent(r.s)}">${rowCells(r, `<td><b>${pct(r._w, 1)}</b>${r._w > 1 ? `<small>${t('uses leverage')}</small>` : (S.rows.find(x => x.s === r.s) || {}).hp ? `<small>${t('via {p}', { p: esc(r.hp) })}</small>` : ''}</td>`)}</tr>`).join('')}</tbody></table></div>${moreBtn(rows)}`;
       }
       const textOnly = text.filter(r => !holders.some(h => h.r === r));
       if (textOnly.length || !holders.length) {
