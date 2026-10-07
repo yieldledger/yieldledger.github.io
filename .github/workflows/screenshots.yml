@@ -24,8 +24,10 @@ jobs:
           python scripts/screenshots.py site shots
       - name: Save to the screenshots branch
         run: |
-          cd shots
-          git init -q -b screenshots
+          mv shots /tmp/shots
           git config user.name "Yield Ledger"; git config user.email "hello@yieldledger.invalid"
+          git checkout -q --orphan screenshots
+          git rm -rqf . && git clean -fdxq
+          cp /tmp/shots/*.png .
           git add -A && git commit -q -m "Screenshots"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" screenshots
+          git push -f origin screenshots
