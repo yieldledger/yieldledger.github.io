@@ -1,0 +1,16 @@
+{
+  "name": "Yield Ledger",
+  "short_name": "Yield Ledger",
+  "description": "Dividend and DRIP tracking for Canadian investors.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F1F3F5",
+  "theme_color": "#0B6B62",
+  "lang": "en-CA",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

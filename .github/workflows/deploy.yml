@@ -1,0 +1,81 @@
+name: Update market data and deploy
+
+on:
+  schedule:
+    # 22:40 UTC on weekdays = 6:40 pm Toronto (EDT), after the TSX and NYSE close
+    - cron: "40 22 * * 1-5"
+    # A morning run (8:10 am Toronto) keeps filling in fund profiles and holdings
+    - cron: "10 12 * * *"
+  workflow_dispatch:
+    inputs:
+      discover:
+        description: "Re-scan the whole market for new ETFs, CDRs and stocks now"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+
+      # Market data lives in the Actions cache, not in git, so the repository stays small.
+      - name: Restore market data
+        uses: actions/cache/restore@v4
+        with:
+          path: site/data
+          key: market-data-${{ github.run_id }}
+          restore-keys: market-data-
+
+      - name: Decide whether to refresh data
+        id: plan
+        run: |
+          if [ "${{ github.event_name }}" != "push" ] || [ ! -f site/data/index.json ]; then echo "fetch=true" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-python@v6
+        if: steps.plan.outputs.fetch == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Fetch prices, dividends and fundamentals
+        # Code pushes reuse yesterday's data; scheduled and manual runs refresh it.
+        if: steps.plan.outputs.fetch == 'true'
+        run: |
+          pip install -r scripts/requirements.txt
+          python scripts/fetch_data.py ${{ inputs.discover && '--discover' || '' }}
+
+      - name: Save market data
+        if: steps.plan.outputs.fetch == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: site/data
+          key: market-data-${{ github.run_id }}
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - id: pages
+        uses: actions/deploy-pages@v4

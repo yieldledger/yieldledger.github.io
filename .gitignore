@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.DS_Store
+# market data is rebuilt by the daily job and kept in the Actions cache
+site/data/
