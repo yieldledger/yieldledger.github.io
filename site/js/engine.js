@@ -514,3 +514,27 @@ export function planIdeas(sims, o, goal) {
 /* ------------------------------------------------------------ growth comparison */
 /** Outcome of a simulated position: what you have now plus cash taken out along the way. */
 export const outcome = s => s.valueCad + s.paidOutCad + s.realizedCad;
+
+/* ------------------------------------------------------------ same-paycheque test */
+/**
+ * The retiree's question: take the covered-call fund's payouts as cash, versus holding the plain fund
+ * (dividends reinvested) and selling just enough of it on each payday to get exactly the same cash.
+ * Same money in, same cash out; whatever is left at the end is the difference.
+ */
+export function samePaycheque(sim, twinQ, fx) {
+  const a = simulate({ ...sim.pos, drip: 'off' }, sim.q, fx);
+  const base = replayInto(sim, twinQ, fx, { drip: 'frac' });
+  const lots = [...base.pos.lots];
+  let ranOut = null;
+  for (const l of a.ledger) {
+    if (l.kind !== 'div' || !(l.netCad > 0)) continue;
+    const px = priceOn(twinQ.c, l.pay);
+    if (!(px > 0)) continue;
+    const amt = l.netCad / fxOn(fx, l.pay, twinQ.cur || 'CAD');
+    lots.push({ id: 'w' + lots.length, date: l.pay, shares: -(amt / px) / splitFactorAfter(twinQ, l.pay), cost: amt });
+  }
+  const b = simulate({ ...base.pos, lots }, twinQ, fx);
+  const short = a.paidOutCad - b.realizedCad;
+  if (short > 1) ranOut = short;
+  return { cash: a.paidOutCad, leftA: a.valueCad, leftB: b.valueCad, gap: b.valueCad - a.valueCad, ranOut, skipped: base.skipped };
+}

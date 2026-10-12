@@ -129,7 +129,7 @@ function xrays() {
     const tq = S.twins[E.twinOf(s.q.s)];
     if (!tq || !s.shares) return null;
     const twinSim = E.replayInto(s, tq, S.fx);
-    return { s, tq, twinSim, x: E.xray(s, twinSim) };
+    return { s, tq, twinSim, x: E.xray(s, twinSim), pc: E.samePaycheque(s, tq, S.fx) };
   }).filter(Boolean);
 }
 
@@ -285,10 +285,28 @@ function xrayRow(r) {
       <div><span class="label">${t('{s} per year', { s: esc(s.q.d) })}</span><b class="${cls(x.xirrA)}">${sgnPct(x.xirrA, 1)}</b></div>
       <div><span class="label">${t('{s} per year', { s: esc(tq.d) })}</span><b class="${cls(x.xirrB)}">${sgnPct(x.xirrB, 1)}</b></div>
     </div>
-    <p>${ahead ? t('{a} paid you {i} more in dividends and you are still {g} ahead overall. The yield is earning its keep.', { a: esc(s.q.d), i: money0(Math.abs(x.extraIncome)), g: money0(Math.abs(x.gap)) })
-      : x.extraIncome > 0 ? t('{a} paid you {i} more in dividends, but you would have {g} more in total with plain {b}. The extra yield cost you growth.', { a: esc(s.q.d), b: esc(tq.d), i: money0(x.extraIncome), g: money0(Math.abs(x.gap)) })
-      : t('Plain {b} beat {a} on both income and total return over your holding period.', { a: esc(s.q.d), b: esc(tq.d) })}</p>
+    <p>${ahead ? t('{a} paid you {i} more in dividends and is still {g} ahead overall.', { a: esc(s.q.d), i: money0(Math.abs(x.extraIncome)), g: money0(Math.abs(x.gap)) })
+      : x.extraIncome > 0 ? t('{a} paid you {i} more in dividends; plain {b} grew {g} more. That is the income-for-growth trade.', { a: esc(s.q.d), b: esc(tq.d), i: money0(x.extraIncome), g: money0(Math.abs(x.gap)) })
+      : t('Plain {b} came out ahead on both income and total return over your holding period.', { a: esc(s.q.d), b: esc(tq.d) })}</p>
+    ${paycheckLine(r.pc, s.q, tq)}
+    ${feeLine(s.q, tq)}
   </div>`;
+}
+/** One sentence for retirees: same cash out of both funds, what is left at the end. */
+function paycheckLine(pc, q, tq) {
+  if (!pc || !(pc.cash > 1)) return '';
+  const txt = pc.ranOut ? t('Same-paycheque test: taking the same {c} in cash from {b} by selling shares would have run short by {s}.', { c: money0(pc.cash), b: esc(tq.d), s: money0(pc.ranOut) })
+    : pc.gap > 0 ? t('Same-paycheque test: take the same {c} in cash from {b} by selling shares, and you would still have {g} more left than in {a}.', { c: money0(pc.cash), a: esc(q.d), b: esc(tq.d), g: money0(pc.gap) })
+    : t('Same-paycheque test: taking the same {c} in cash from {b} by selling shares would leave {g} less than {a}. Here the covered-call fund did better.', { c: money0(pc.cash), a: esc(q.d), b: esc(tq.d), g: money0(-pc.gap) });
+  return `<p class="xr-pc">${txt}</p>`;
+}
+function feeLine(q, tq) {
+  const r = S.rows.find(x => x.s === q.s) || {}, rb = S.rows.find(x => x.s === tq.s) || {};
+  const fa = q.f?.mer ?? r.mer, fb = tq.f?.mer ?? rb.mer, da = q.st?.mdd, db = tq.st?.mdd;
+  const bits = [];
+  if (fa != null && fb != null) bits.push(t('Fees: {a} {fa} % vs {b} {fb} % a year', { a: esc(q.d), b: esc(tq.d), fa: num(fa, 2), fb: num(fb, 2) }));
+  if (da != null && db != null) bits.push(t('Worst drop in 5 years: {a} −{da} vs {b} −{db}', { a: esc(q.d), b: esc(tq.d), da: pct(da, 0), db: pct(db, 0) }));
+  return bits.length ? `<p class="xr-facts">${bits.join(' · ')}</p>` : '';
 }
 function placementBlock() {
   const moves = E.placement(S.sims);
@@ -1004,6 +1022,12 @@ function valuationPanel(q) {
     if (g.k === 'pct') return t('Over the last 5 years, the yield was lower than today {p} of the time.', { p: pct(g.p, 0) });
     return t('The price is {p} of the way from its 52-week low of {lo} to its high of {hi}.', { p: pct(g.r, 0), lo: nat(st.r52lo, q.cur), hi: nat(st.r52hi, q.cur) });
   });
+  const bench = q.ex === 'US' ? (S.rows.find(r => r.s === 'VOO') || S.rows.find(r => r.s === 'SPY')) : S.rows.find(r => r.s === 'VFV.TO');
+  if (bench && bench.s !== q.s && (st.tr5 != null || st.tr1 != null)) {
+    const n = st.tr5 != null && bench.tr5 != null ? 5 : 1, me = st[`tr${n}`], it = bench[`tr${n}`];
+    if (me != null && it != null) lines.push(n === 5 ? t('Against the S&P 500 ({b}), it returned {a} a year over 5 years with dividends reinvested, versus {i} for the index.', { b: esc(bench.d), a: sgnPct(me, 1), i: sgnPct(it, 1) })
+      : t('Against the S&P 500 ({b}), it returned {a} over the past year with dividends reinvested, versus {i} for the index.', { b: esc(bench.d), a: sgnPct(me, 1), i: sgnPct(it, 1) }));
+  }
   const head = { cheap: t('Cheap vs its history'), fair: t('Fair vs its history'), expensive: t('Pricey vs its history'), range: t('Price range only') }[v.kind];
   const sub = { cheap: t('Signals point to a lower price than usual for what it pays.'), fair: t('Signals are mixed or close to normal.'), expensive: t('Signals point to a higher price than usual for what it pays.'), range: t('It pays little or no dividend, so only the price range is shown.') }[v.kind];
   const fairTxt = v.fair ? t('At its 5-year average yield, today’s payout of {d} a share points to a price around {f}{f10}. It last closed at {p}.', { d: nat(st.fwd, q.cur), f: `<b>${nat(v.fair, q.cur)}</b>`, f10: v.fair10 ? t(' ({f} at its 10-year average)', { f: nat(v.fair10, q.cur) }) : '', p: nat(q.px, q.cur) }) : '';
@@ -1033,9 +1057,10 @@ function xrayDetail(q, twinQ, tx) {
   const intro = tx.mode === 'mine'
     ? t('Your purchases of {a}, replayed dollar for dollar into {b} on the same dates, dividends reinvested the same way.', { a: esc(q.d), b: esc(twinQ.d) })
     : t('{m} put into {a} and into {b} on {d}, dividends reinvested, inside a TFSA.', { m: money0(10000), a: esc(q.d), b: esc(twinQ.d), d: esc(dfmt(tx.start)) });
-  const verdict = gap >= 0 ? t('The extra yield has paid off: {a} is ahead on total return.', { a: esc(q.d) })
-    : extra > 0 ? t('{a} paid {i} more in dividends but ended {g} behind plain {b}. That gap is the growth the option strategy gave up.', { a: esc(q.d), b: esc(twinQ.d), i: money0(extra), g: money0(-gap) })
-    : t('Plain {b} won on both income and total return.', { b: esc(twinQ.d) });
+  const verdict = gap >= 0 ? t('{a} is ahead on total return as well as income over this period.', { a: esc(q.d) })
+    : extra > 0 ? t('{a} paid {i} more in dividends; plain {b} grew {g} more. That is the trade the option strategy makes: steadier cash now for less growth.', { a: esc(q.d), b: esc(twinQ.d), i: money0(extra), g: money0(-gap) })
+    : t('Plain {b} came out ahead on both income and total return.', { b: esc(twinQ.d) });
+  const pc = E.samePaycheque(a, twinQ, S.fx);
   return `<section class="sec"><div class="sec-head"><h2>${t('Yield X-ray')}</h2><span class="muted" style="font-size:13px">${t('{a} vs its plain twin {b}', { a: esc(q.d), b: esc(twinQ.d) })}</span></div>
     <div class="panel stack"><p style="margin:0">${intro}${b.skipped ? ' ' + t('Part of your history predates {b}’s data, so those purchases are left out of its side.', { b: esc(twinQ.d) }) : ''}</p>
     <div class="xr-cmp">
@@ -1044,7 +1069,11 @@ function xrayDetail(q, twinQ, tx) {
       <div><span class="label">${t('Difference')}</span><b class="${cls(gap)}">${sgnMoney(gap)}</b><small>${t('Income difference {i}', { i: sgnMoney(extra) })}</small></div>
     </div>
     <p class="verdict ${gap >= 0 ? 'ahead' : 'behind'}">${verdict}</p>
-    <div class="legend"><span><i class="sw c1"></i>${esc(q.d)}</span><span><i class="sw c3"></i>${esc(twinQ.d)}</span></div><div id="ch-xr"></div></div></section>`;
+    ${pc && pc.cash > 1 ? `<div class="pc-box"><h4>${t('Same-paycheque test')}</h4><p class="muted" style="margin:0 0 8px;font-size:13.5px">${t('For people living off the income: take {a}’s payouts as cash, or hold {b} and sell just enough of it on each payday to get the same cash. Same money in, same cash out.', { a: esc(q.d), b: esc(twinQ.d) })}</p>
+      <div class="xr-cmp"><div><span class="label">${t('Cash taken out')}</span><b>${money0(pc.cash)}</b><small>${t('the same from both')}</small></div><div><span class="label">${t('Left in {s}', { s: esc(q.d) })}</span><b>${money0(pc.leftA)}</b></div><div><span class="label">${t('Left in {s}', { s: esc(twinQ.d) })}</span><b>${money0(pc.leftB)}</b>${pc.ranOut ? `<small class="neg">${t('ran short by {m}', { m: money0(pc.ranOut) })}</small>` : ''}</div></div></div>` : ''}
+    ${feeLine(q, twinQ)}
+    <div class="legend"><span><i class="sw c1"></i>${esc(q.d)}</span><span><i class="sw c3"></i>${esc(twinQ.d)}</span></div><div id="ch-xr"></div>
+    <p class="muted" style="margin:0;font-size:12.5px">${t('Covered-call funds can hold up better when markets move sideways, and some aim for smaller drops. This shows what actually happened over these dates, not what will happen next.')}</p></div></section>`;
 }
 function drawXrayChart(tx, q, twinQ) {
   const months = E.monthsFrom(tx.a.firstDate);

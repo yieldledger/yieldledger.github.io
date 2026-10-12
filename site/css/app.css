@@ -366,3 +366,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 .fb-kinds label:has(input:focus-visible) { outline: 2px solid var(--accent); }
 .fb-dlg textarea { font-family: var(--f-body); font-size: 15px; }
 .foot { padding-bottom: 64px; }
+.xr-pc { margin: 0; font-size: 13.5px !important; padding: 8px 10px; border-radius: 8px; background: var(--sunk); }
+.xr-facts { margin: 0; font-size: 12.5px !important; color: var(--muted); }
+.pc-box { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.pc-box h4 { margin: 0 0 4px; font-size: 15px; }
