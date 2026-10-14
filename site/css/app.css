@@ -370,3 +370,5 @@ details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 .xr-facts { margin: 0; font-size: 12.5px !important; color: var(--muted); }
 .pc-box { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
 .pc-box h4 { margin: 0 0 4px; font-size: 15px; }
+.tfsa-strip a { margin-left: 4px; }
+.tfsa-new .check-inline { font-weight: 500; }

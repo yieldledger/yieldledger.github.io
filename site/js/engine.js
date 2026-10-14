@@ -538,3 +538,39 @@ export function samePaycheque(sim, twinQ, fx) {
   if (short > 1) ranOut = short;
   return { cash: a.paidOutCad, leftA: a.valueCad, leftB: b.valueCad, gap: b.valueCad - a.valueCad, ranOut, skipped: base.skipped };
 }
+
+/* ------------------------------------------------------------ TFSA contribution room */
+// Annual TFSA dollar limits set by the CRA. Years after the last one use the person's own setting (default $7,000).
+export const TFSA_LIMITS = { 2009: 5000, 2010: 5000, 2011: 5000, 2012: 5000, 2013: 5500, 2014: 5500, 2015: 10000, 2016: 5500, 2017: 5500, 2018: 5500, 2019: 6000, 2020: 6000, 2021: 6000, 2022: 6000, 2023: 6500, 2024: 7000, 2025: 7000, 2026: 7000 };
+export const tfsaLimit = (y, future = 7000) => TFSA_LIMITS[y] ?? future;
+/**
+ * Room left today = room on the as-of date + each new year's limit since then + withdrawals added back the
+ * following January 1 − new money put into TFSA holdings after the as-of date. Reinvested dividends and
+ * buying with cash already inside the TFSA don't use room, so a purchase can be marked as not new money.
+ */
+export function tfsaRoom(cfg, positions, quotes, fx, asOf = today()) {
+  if (!cfg || !Number.isFinite(+cfg.room) || !cfg.asOf) return null;
+  const y0 = +cfg.asOf.slice(0, 4), y1 = +asOf.slice(0, 4), future = +cfg.future || 7000;
+  let added = 0;
+  for (let y = y0 + 1; y <= y1; y++) added += tfsaLimit(y, future);
+  let back = 0;
+  for (const w of cfg.withdrawals || []) if (w.date >= cfg.asOf && +w.date.slice(0, 4) + 1 <= y1) back += +w.amount || 0;
+  const pending = (cfg.withdrawals || []).filter(w => +w.date.slice(0, 4) === y1).reduce((t, w) => t + (+w.amount || 0), 0);
+  let used = 0;
+  const items = [];
+  for (const p of positions) {
+    if (p.account !== 'TFSA') continue;
+    const q = quotes[p.sym];
+    for (const l of p.lots) {
+      if (!(+l.shares > 0) || l.newMoney === false || !l.date) continue;
+      const counts = l.date > cfg.asOf || (l.date === cfg.asOf && l.addedAt && cfg.setAt && l.addedAt >= cfg.setAt);
+      if (!counts) continue;
+      const cur = q?.cur || 'CAD';
+      const native = +l.cost > 0 ? +l.cost : q ? +l.shares * priceOn(q.c, l.date) : NaN;
+      const cad = native * fxOn(fx, l.date, cur);
+      if (Number.isFinite(cad)) { used += cad; items.push({ sym: p.sym, date: l.date, cad }); }
+    }
+  }
+  const left = +cfg.room + added + back - used;
+  return { left, used, added, back, pending, items, next: { year: y1 + 1, amount: tfsaLimit(y1 + 1, future) + pending } };
+}

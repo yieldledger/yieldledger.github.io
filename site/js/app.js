@@ -58,7 +58,7 @@ function toast(msg) { const el = $('#toast'); el.textContent = msg; el.hidden = 
 
 /* ------------------------------------------------------------ state */
 const DEMO = {
-  v: 1, settings: { account: 'TFSA', drip: 'frac', goal: 500 },
+  v: 1, settings: { account: 'TFSA', drip: 'frac', goal: 500, tfsa: { room: 12500, asOf: '2026-01-01', future: 7000 } },
   bills: [{ id: 'b1', name: 'Phone', amount: 65 }, { id: 'b2', name: 'Internet', amount: 85 }, { id: 'b3', name: 'Hydro', amount: 140 }, { id: 'b4', name: 'Car insurance', amount: 160 }, { id: 'b5', name: 'Groceries', amount: 600 }],
   positions: [
     { id: 'd1', sym: 'VDY.TO', account: 'TFSA', drip: 'frac', lots: [{ id: 'l1', date: '2022-01-17', shares: 120 }, { id: 'l2', date: '2024-03-01', shares: 40 }] },
@@ -266,6 +266,18 @@ function viewLogin() {
   });
 }
 
+/* ------------------------------------------------------------ TFSA room */
+const tfsa = () => E.tfsaRoom(S.pf?.settings?.tfsa, S.pf?.positions || [], S.quotes, S.fx);
+function tfsaStrip() {
+  const hasTfsa = S.pf.positions.some(p => p.account === 'TFSA');
+  const r = tfsa();
+  if (!r) return hasTfsa ? `<p class="muted" style="margin:0;font-size:13.5px"><a href="#/settings">${t('Track your TFSA contribution room')} →</a></p>` : '';
+  const over = r.left < 0;
+  return `<div class="alert ${over ? 'bad' : 'good'} tfsa-strip"><i></i><span>${over
+    ? t('TFSA over-contribution: {m} over your room. The CRA charges 1% a month on the excess until it is withdrawn or new room arrives.', { m: `<b>${money0(-r.left)}</b>` })
+    : t('TFSA contribution room left: {m}.', { m: `<b>${money0(r.left)}</b>` })} ${t('{a} more on January 1, {y}.', { a: money0(r.next.amount), y: r.next.year })} <a href="#/settings">${t('Edit')}</a></span></div>`;
+}
+
 /* ------------------------------------------------------------ portfolio */
 function kpi(label, v, s, extra = '') { return `<div class="kpi ${extra}"><span class="label">${label}</span><span class="v">${v}</span><span class="s">${s}</span></div>`; }
 function holdingChips(s) {
@@ -343,6 +355,7 @@ function viewPortfolio() {
     <div class="tools"><a class="btn" href="#/add">${t('Add holdings')}</a></div></div>
   ${S.missing.length ? `<div class="alert warn"><i></i><span>${t('Waiting for market data on {s}.', { s: S.missing.map(p => esc(p.sym)).join(', ') })}</span></div>` : ''}
   ${al.length ? `<div class="alerts">${al.slice(0, 5).map(a => `<div class="alert ${a.lvl}"><i></i><span>${esc(a.text)}</span></div>`).join('')}</div>` : ''}
+  ${tfsaStrip()}
   ${guideBlock()}
   <section class="kpis" aria-label="${esc(t('Summary'))}">
     ${kpi(t('Market value'), money0(T.valueCad), t('{m} of it from DRIP shares', { m: money0(T.dripValue) }))}
@@ -1134,6 +1147,7 @@ function positionAdmin(sim) {
         <div class="field"><label for="lt-date">${t('Date')}</label><input id="lt-date" type="date" value="${E.today()}" max="${E.today()}"></div>
         <div class="field"><label for="lt-sh">${t('Shares')}</label><input id="lt-sh" type="number" step="any" min="0" inputmode="decimal"></div>
         <div class="field"><label for="lt-cost">${t('Amount ({c}, optional)', { c: esc(sim.cur) })}</label><input id="lt-cost" type="number" step="any" min="0" inputmode="decimal" placeholder="${esc(t('Close price × shares'))}"></div>
+        ${p.account === 'TFSA' ? `<div class="field wide"><label class="check-inline"><input type="checkbox" id="lt-new" checked> ${t('New money deposited into the TFSA (uses contribution room)')}</label></div>` : ''}
         <p class="err" id="lt-err" hidden style="grid-column:1/-1"></p>
         <div class="tools" style="grid-column:1/-1"><button class="btn primary" type="submit">${t('Add')}</button></div>
       </form>
@@ -1154,7 +1168,7 @@ function wirePositionAdmin(sim) {
     const err = $('#lt-err');
     if (!(sh > 0) || !date) { err.textContent = t('Enter a date and a number of shares.'); err.hidden = false; return; }
     if (side === 'sell' && sh > sim.shares + 1e-9) { err.textContent = t('You hold {n} shares.', { n: shares(sim.shares) }); err.hidden = false; return; }
-    p.lots.push({ id: rid('l'), date, shares: side === 'sell' ? -sh : sh, cost: cost > 0 ? cost : null });
+    p.lots.push({ id: rid('l'), date, shares: side === 'sell' ? -sh : sh, cost: cost > 0 ? cost : null, addedAt: Date.now(), ...($('#lt-new') && !$('#lt-new').checked && side !== 'sell' ? { newMoney: false } : {}) });
     changed(); toast(side === 'sell' ? t('Sale added') : t('Purchase added'));
   });
 }
@@ -1174,6 +1188,7 @@ function viewAdd() {
     <div class="field"><label for="o-date">${t('Date bought')}</label><input id="o-date" type="date" max="${E.today()}" value="${E.addDays(E.today(), -365)}"></div>
     <div class="field"><label for="o-acct">${t('Account')}</label>${ACCT('o-acct', st.account)}</div>
     <div class="field"><label for="o-drip">${t('Dividends')}</label><select id="o-drip">${Object.entries(DRIP()).map(([k, l]) => `<option value="${k}" ${k === st.drip ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="field wide tfsa-new" id="o-tfsa" hidden><label class="check-inline"><input type="checkbox" id="o-new" checked> ${t('New money deposited into the TFSA (uses contribution room)')}</label><span class="hint" id="o-room"></span></div>
     <div class="field wide"><label for="o-cost">${t('Amount paid (optional)')}</label><input id="o-cost" type="number" step="any" min="0" inputmode="decimal" placeholder="${esc(t('Leave blank to use that day’s closing price'))}"></div>
     <p class="err" id="o-err" hidden style="grid-column:1/-1"></p>
     <div class="tools" style="grid-column:1/-1"><button class="btn primary" type="submit">${t('Add holding')}</button><span class="muted" style="font-size:13px">${t('Bought more than once? Add the first purchase here, then add the others from the holding’s page.')}</span></div>
@@ -1192,6 +1207,24 @@ function viewAdd() {
   </div>
   ${dataFoot()}`);
   prefill = '';
+  const pq = {};
+  const roomPreview = () => {
+    const box = $('#o-tfsa'), isT = $('#o-acct').value === 'TFSA';
+    box.hidden = !isT; if (!isT) return;
+    const r = tfsa(), el = $('#o-room');
+    if (!r) { el.innerHTML = `<a href="#/settings">${t('Set your TFSA room in Settings')}</a> ${t('to see how much is left.')}`; return; }
+    const sh = parseFloat($('#o-sh').value), cost = parseFloat($('#o-cost').value), date = $('#o-date').value;
+    const q = picked && (S.quotes[picked.s] || pq[picked.s]);
+    if (picked && !q && !(cost > 0) && !pq[picked.s]) { pq[picked.s] = null; D.loadQuote(picked.s).then(x => { if (x) { pq[picked.s] = x; roomPreview(); } }); }
+    const px = q && date ? E.priceOn(q.c, date) : picked?.px;
+    let amt = cost > 0 ? cost : (picked && sh > 0 ? sh * (px || 0) : 0);
+    if (picked && picked.cur === 'USD') amt *= E.fxOn(S.fx, date || E.today(), 'USD');
+    const after = r.left - ($('#o-new').checked ? amt : 0);
+    el.innerHTML = amt > 0 && $('#o-new').checked ? t('Room left: {a} → {b} after this purchase.', { a: money0(r.left), b: `<b class="${after < 0 ? 'neg' : ''}">${money0(after)}</b>` }) + (after < 0 ? ' ' + t('That is over your room; the CRA charges 1% a month on the excess.') : '')
+      : t('Room left: {a}. Reinvested dividends and cash already in the TFSA do not use room.', { a: money0(r.left) });
+  };
+  ['#o-acct', '#o-sh', '#o-cost', '#o-date', '#o-new', '#o-sym'].forEach(s => { $(s).addEventListener('input', roomPreview); $(s).addEventListener('change', roomPreview); });
+  setTimeout(roomPreview, 0);
   $$('[data-pane]').forEach(b => b.addEventListener('click', () => {
     $$('[data-pane]').forEach(x => x.setAttribute('aria-selected', String(x === b)));
     $$('[data-p]').forEach(p => (p.hidden = p.dataset.p !== b.dataset.pane));
@@ -1221,7 +1254,7 @@ function viewAdd() {
     const sh = parseFloat($('#o-sh').value), date = $('#o-date').value, cost = parseFloat($('#o-cost').value);
     if (!picked) { err.textContent = t('{s} isn’t in the tracked list. Pick one from the suggestions.', { s: inp.value || t('That ticker') }); err.hidden = false; return; }
     if (!(sh > 0) || !date) { err.textContent = t('Enter the number of shares and the date you bought.'); err.hidden = false; return; }
-    const id = addRows([{ sym: picked, shares: sh, date, cost: cost > 0 ? cost : null, account: $('#o-acct').value }], $('#o-drip').value);
+    const id = addRows([{ sym: picked, shares: sh, date, cost: cost > 0 ? cost : null, account: $('#o-acct').value, newMoney: $('#o-acct').value === 'TFSA' ? $('#o-new').checked : undefined }], $('#o-drip').value);
     toast(t('{s} added. Dividends since {d} replayed.', { s: picked.d, d: dfmt(date) }));
     changed('#/h/' + encodeURIComponent(id));
   });
@@ -1249,7 +1282,7 @@ function addRows(rows, drip) {
   for (const r of rows) {
     let p = S.pf.positions.find(x => x.sym === r.sym.s && x.account === r.account);
     if (!p) { p = { id: rid('p'), sym: r.sym.s, account: r.account, drip: drip || 'frac', lots: [] }; S.pf.positions.push(p); }
-    p.lots.push({ id: rid('l'), date: r.date, shares: r.shares, cost: r.cost || null });
+    p.lots.push({ id: rid('l'), date: r.date, shares: r.shares, cost: r.cost || null, addedAt: Date.now(), ...(r.newMoney === false ? { newMoney: false } : {}) });
     last = p.id;
   }
   return last;
@@ -1266,6 +1299,7 @@ function viewSettings() {
     <div class="field"><label for="s-goal">${t('Monthly income goal ($)')}</label><input id="s-goal" type="number" min="0" step="50" value="${esc(st.goal || '')}"></div>
     <div class="tools"><button class="btn primary" type="submit">${t('Save')}</button></div>
   </form></div></section>
+  ${tfsaSettings()}
   <section class="sec"><h2 style="font-size:18px">${t('Your data')}</h2><div class="panel stack">
     <p style="margin:0">${S.demo ? t('You are in the demo. Nothing is saved.') : S.auth.mode === 'cloud' ? t('Signed in as {e}. Your portfolio is saved to your account.', { e: `<b>${esc(S.user.email)}</b>` }) : t('Signed in as {e}. Your portfolio is saved in this browser only, so back it up if you switch devices.', { e: `<b>${esc(S.user.email)}</b>` })}</p>
     <div class="tools"><button class="btn" data-act="export">${t('Download a backup')}</button><label class="btn" for="imp-file">${t('Restore a backup')}</label><input id="imp-file" type="file" accept="application/json,.json" hidden></div>
@@ -1280,6 +1314,7 @@ function viewSettings() {
     <p style="margin:0">${m ? t('Last update {d}. {n} securities tracked.', { d: esc(new Date(m.updated).toLocaleString(loc(), { dateStyle: 'full', timeStyle: 'short' })), n: m.count }) + (m.failed?.length ? ' ' + t('Could not refresh: {s}.', { s: esc(m.failed.join(', ')) }) : '') : t('No market data yet.')}</p>
     <p class="muted" style="margin:8px 0 0;font-size:13px">${t('Prices, dividends and fundamentals refresh automatically after each trading day’s close.')}</p></div></section>
   ${dataFoot()}`);
+  wireTfsaSettings();
   $('#set-form').addEventListener('submit', ev => {
     ev.preventDefault();
     Object.assign(st, { account: $('#s-acct').value, drip: $('#s-drip').value, goal: Math.max(0, +$('#s-goal').value || 0) });
@@ -1334,9 +1369,51 @@ document.addEventListener('click', async e => {
     return;
   }
   if (act === 'feedback') return openFeedback();
+  if (act === 'tfsa-clear') { delete S.pf.settings.tfsa; persist(); toast(t('TFSA tracking turned off')); return viewSettings(); }
+  if (act === 'tfsa-wdel') { S.pf.settings.tfsa.withdrawals.splice(+a.dataset.i, 1); persist(); return viewSettings(); }
   if (act === 'install' && installEvt) { installEvt.prompt(); const r = await installEvt.userChoice; installEvt = null; if (r.outcome === 'accepted') toast(t('Installed. Look for Yield Ledger on your home screen.')); return route(); }
   if (act === 'del-acct') { await S.auth.deleteAccount(); toast(t('Account deleted')); return; }
 });
+
+/* ------------------------------------------------------------ TFSA room settings */
+function tfsaSettings() {
+  const c = S.pf.settings.tfsa || {}, r = tfsa();
+  const ws = c.withdrawals || [];
+  return `<section class="sec"><h2 style="font-size:18px">${t('TFSA contribution room')}</h2><div class="panel stack">
+    <p style="margin:0">${t('Enter the room the CRA shows for you. Yield Ledger then subtracts new money you put into TFSA holdings, adds each new year’s limit on January 1, and adds back withdrawals the following January 1.')}</p>
+    ${r ? `<div class="alert ${r.left < 0 ? 'bad' : 'good'}"><i></i><span>${t('Room left today: {m}', { m: `<b>${money0(r.left)}</b>` })} · ${t('{a} more on January 1, {y}.', { a: money0(r.next.amount), y: r.next.year })}${r.used ? ' · ' + t('{m} used since {d}', { m: money0(r.used), d: esc(dfmt(c.asOf)) }) : ''}</span></div>` : ''}
+    <form id="tfsa-form" class="form-grid" novalidate>
+      <div class="field"><label for="tf-room">${t('Your TFSA room ($)')}</label><input id="tf-room" type="number" min="0" step="100" inputmode="decimal" value="${esc(c.room ?? '')}"></div>
+      <div class="field"><label for="tf-asof">${t('As of')}</label><input id="tf-asof" type="date" max="${E.today()}" value="${esc(c.asOf || E.today())}"><span class="hint">${t('CRA My Account and your notice of assessment show your room as of January 1.')}</span></div>
+      <div class="field"><label for="tf-future">${t('Limit for future years ($)')}</label><input id="tf-future" type="number" min="0" step="500" value="${esc(c.future ?? 7000)}"><span class="hint">${t('The 2026 limit is $7,000. The CRA usually announces next year’s limit in November.')}</span></div>
+      <div class="tools" style="grid-column:1/-1"><button class="btn primary" type="submit">${t('Save TFSA room')}</button>${c.room != null ? `<button class="btn ghost" type="button" data-act="tfsa-clear">${t('Stop tracking')}</button>` : ''}</div>
+    </form>
+    <div><span class="label">${t('Withdrawals')}</span>
+      <p class="muted" style="margin:4px 0 8px;font-size:13px">${t('Money you took out of your TFSA. It comes back as room on January 1 of the next year. Selling inside the TFSA is not a withdrawal.')}</p>
+      ${ws.length ? `<div class="stack" style="gap:4px">${ws.map((w, i) => `<div class="bill-top"><span>${esc(dfmt(w.date))}</span><b class="mono">${money0(+w.amount)}</b><button class="x" data-act="tfsa-wdel" data-i="${i}" aria-label="${esc(t('Remove'))}">×</button></div>`).join('')}</div>` : ''}
+      <form id="tfsa-wform" class="bill-top" novalidate style="margin-top:6px"><input id="tw-date" type="date" max="${E.today()}" value="${E.today()}" aria-label="${esc(t('Date'))}"><input id="tw-amt" type="number" min="0" step="50" inputmode="decimal" placeholder="${esc(t('Amount'))}" aria-label="${esc(t('Amount'))}"><button class="btn sm" type="submit">${t('Add')}</button></form>
+    </div>
+    <p class="muted" style="margin:0;font-size:12.5px">${t('An estimate to help you plan, not an official figure. The CRA’s number is the one that counts.')}</p>
+  </div></section>`;
+}
+function wireTfsaSettings() {
+  $('#tfsa-form')?.addEventListener('submit', ev => {
+    ev.preventDefault();
+    const room = parseFloat($('#tf-room').value);
+    if (!(room >= 0)) { toast(t('Enter your TFSA room.')); return; }
+    const prev = S.pf.settings.tfsa || {};
+    S.pf.settings.tfsa = { ...prev, room, asOf: $('#tf-asof').value || E.today(), future: Math.max(0, +$('#tf-future').value || 7000), setAt: Date.now() };
+    persist(); toast(t('TFSA room saved')); viewSettings();
+  });
+  $('#tfsa-wform')?.addEventListener('submit', ev => {
+    ev.preventDefault();
+    const amt = parseFloat($('#tw-amt').value), date = $('#tw-date').value;
+    if (!(amt > 0) || !date) { toast(t('Enter a date and an amount.')); return; }
+    const c = S.pf.settings.tfsa = S.pf.settings.tfsa || { future: 7000 };
+    (c.withdrawals = c.withdrawals || []).push({ date, amount: amt });
+    persist(); viewSettings();
+  });
+}
 
 /* ------------------------------------------------------------ feedback */
 const REPO = 'https://github.com/yieldledger/yieldledger.github.io';
