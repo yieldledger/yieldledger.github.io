@@ -12,3 +12,13 @@ drop policy if exists "own portfolio read" on public.portfolios;
 drop policy if exists "own portfolio write" on public.portfolios;
 create policy "own portfolio read" on public.portfolios for select using (auth.uid() = user_id);
 create policy "own portfolio write" on public.portfolios for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Lets a signed-in person delete their own login (their portfolio row is removed with it).
+create or replace function public.delete_my_account() returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  delete from auth.users where id = auth.uid();
+end;
+$$;
+revoke all on function public.delete_my_account() from public, anon;
+grant execute on function public.delete_my_account() to authenticated;

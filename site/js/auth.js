@@ -61,12 +61,13 @@ function deviceAuth() {
 
 /* ---------------- cloud accounts (Supabase) ---------------- */
 async function cloudAuth() {
-  const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm');
+  const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
   const sb = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } });
   const { data: { session } } = await sb.auth.getSession();
   let user = session ? { id: session.user.id, email: session.user.email } : null;
   const listeners = new Set();
-  sb.auth.onAuthStateChange((_e, s) => {
+  sb.auth.onAuthStateChange((evt, s) => {
+    if (evt === 'PASSWORD_RECOVERY') setTimeout(() => newPassword(sb), 300);
     const next = s ? { id: s.user.id, email: s.user.email } : null;
     if ((next && next.id) !== (user && user.id)) { user = next; listeners.forEach(f => f(user)); }
   });
@@ -105,7 +106,21 @@ async function cloudAuth() {
     async deleteAccount() {
       if (!user) return;
       await sb.from('portfolios').delete().eq('user_id', user.id);
+      try { await sb.rpc('delete_my_account'); } catch {} // removes the login too (see supabase/schema.sql)
       await this.signOut();
     },
   };
+}
+
+/* After a password-reset link, ask for the new password. */
+async function newPassword(sb) {
+  const { t } = await import('./i18n.js');
+  for (let i = 0; i < 3; i++) {
+    const pw = window.prompt(t('Choose a new password (at least 8 characters)'));
+    if (pw == null) return;
+    if (pw.length < 8) continue;
+    const { error } = await sb.auth.updateUser({ password: pw });
+    window.alert(error ? error.message : t('Password updated. You are signed in.'));
+    return;
+  }
 }

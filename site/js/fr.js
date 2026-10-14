@@ -760,5 +760,7 @@ export const FR = {
  "Enter your TFSA room.": "Indiquez vos droits au CELI.",
  "TFSA room saved": "Droits au CELI enregistrés",
  "Enter a date and an amount.": "Indiquez une date et un montant.",
- "TFSA tracking turned off": "Suivi du CELI désactivé"
+ "TFSA tracking turned off": "Suivi du CELI désactivé",
+ "Choose a new password (at least 8 characters)": "Choisissez un nouveau mot de passe (au moins 8 caractères)",
+ "Password updated. You are signed in.": "Mot de passe mis à jour. Vous êtes connecté."
 };
