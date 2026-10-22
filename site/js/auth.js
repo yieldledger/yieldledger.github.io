@@ -87,6 +87,11 @@ async function cloudAuth() {
       if (error) fail(error);
       user = { id: data.user.id, email: data.user.email }; return user;
     },
+    providers: (cfg.oauth || []).filter(x => ['google', 'azure', 'apple'].includes(x)),
+    async signInWith(provider) {
+      const { error } = await sb.auth.signInWithOAuth({ provider, options: { redirectTo: location.origin + location.pathname } });
+      if (error) fail(error);
+    },
     async resetPassword(email) {
       const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
       if (error) fail(error);

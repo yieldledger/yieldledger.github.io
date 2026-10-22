@@ -4,6 +4,8 @@
 window.YL_CONFIG = {
   supabaseUrl: "",
   supabaseAnonKey: "",
+  // Sign-in buttons for providers turned on in Supabase → Authentication → Providers: "google", "azure" (Microsoft), "apple".
+  oauth: [],
   // Optional tip jar: a Stripe Payment Link (Stripe → Payment Links → New → "Customers choose what to pay").
   // Leave blank to hide the "Support Yield Ledger" button.
   donateUrl: "",
