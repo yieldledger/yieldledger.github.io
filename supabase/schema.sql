@@ -6,6 +6,8 @@ create table if not exists public.portfolios (
 );
 
 alter table public.portfolios enable row level security;
+-- Needed when "Automatically expose new tables" is off: signed-in users may reach this table (policies below still limit them to their own row).
+grant select, insert, update, delete on public.portfolios to authenticated;
 
 -- Each person can only see and change their own portfolio.
 drop policy if exists "own portfolio read" on public.portfolios;
