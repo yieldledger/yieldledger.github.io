@@ -372,3 +372,5 @@ details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 .pc-box h4 { margin: 0 0 4px; font-size: 15px; }
 .tfsa-strip a { margin-left: 4px; }
 .tfsa-new .check-inline { font-weight: 500; }
+.oauth { display: grid; gap: 8px; }
+.oauth-btn { justify-content: center; gap: 10px; background: var(--surface); }
