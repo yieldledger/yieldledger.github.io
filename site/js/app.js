@@ -2,8 +2,9 @@ import { createAuth } from './auth.js';
 import * as D from './data.js';
 import * as E from './engine.js';
 import { lineChart, barChart, sparkline } from './charts.js';
-import { parseQuick, parseExport } from './importer.js';
+import { parseQuick, parseExport, parseExcel, parsePdf } from './importer.js';
 import { t, tp, getLang, setLang, loc, MONTHS } from './i18n.js';
+import { HELP } from './help.js';
 
 /* ------------------------------------------------------------ helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -55,6 +56,31 @@ const store = { get: k => { try { return localStorage.getItem(k); } catch { retu
 const DRIP = () => ({ frac: t('DRIP (fractional)'), whole: t('DRIP (whole shares)'), off: t('Cash payout') });
 let toastT;
 function toast(msg) { const el = $('#toast'); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (el.hidden = true), 3600); }
+
+/* ------------------------------------------------------------ "?" help */
+const helpOn = () => store.get('yl.help') !== '0';
+const hq = key => (HELP[key] ? `<button type="button" class="hq" data-help="${esc(key)}" aria-label="${esc(t('What does this mean?'))}">?</button>` : '');
+/** A field label with its "?" explanation. */
+const H = (key, vars) => t(key, vars) + hq(key);
+function showHelp(btn) {
+  let pop = $('#hq-pop');
+  if (pop && pop.dataset.for === btn.dataset.help && !pop.hidden) { pop.hidden = true; return; }
+  if (!pop) { pop = document.createElement('div'); pop.id = 'hq-pop'; pop.className = 'hq-pop'; pop.setAttribute('role', 'tooltip'); document.body.appendChild(pop); }
+  const key = btn.dataset.help;
+  pop.dataset.for = key;
+  pop.innerHTML = `<b>${esc(t(key, { n: '', s: '', a: '' }).replace(/\s+/g, ' ').trim())}</b><span>${esc(t(HELP[key]))}</span>`;
+  pop.hidden = false;
+  const r = btn.getBoundingClientRect(), w = Math.min(300, window.innerWidth - 24);
+  pop.style.width = w + 'px';
+  pop.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left + r.width / 2 - w / 2)) + window.scrollX + 'px';
+  pop.style.top = r.bottom + 8 + window.scrollY + 'px';
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.hq');
+  if (b) { e.preventDefault(); e.stopPropagation(); showHelp(b); return; }
+  const pop = $('#hq-pop'); if (pop && !e.target.closest('#hq-pop')) pop.hidden = true;
+}, true);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#hq-pop')) $('#hq-pop').hidden = true; });
 
 /* ------------------------------------------------------------ state */
 const DEMO = {
@@ -164,7 +190,9 @@ function route() {
   const h = location.hash || '#/';
   if (!S.user && !S.demo) return viewLogin();
   if (h === '#/login') { location.hash = '#/'; return; }
-  const [, a, b] = h.split('/');
+  const [, a0, b] = h.split('/');
+  const [a, anchor] = (a0 || '').split('#');
+  if (anchor) setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ block: 'start' }), 60);
   if (h !== S.lastRoute) window.scrollTo(0, 0);
   S.lastRoute = h;
   if (!a) return viewPortfolio();
@@ -174,6 +202,7 @@ function route() {
   if (a === 'research') return viewResearch();
   if (a === 'add') return viewAdd();
   if (a === 'settings') return viewSettings();
+  if (a === 'watch') return viewWatch(b ? decodeURIComponent(b) : '');
   if (a === 'h') return viewDetail({ posId: decodeURIComponent(b || '') });
   if (a === 't') return viewDetail({ sym: decodeURIComponent(b || '') });
   return viewPortfolio();
@@ -182,12 +211,13 @@ function route() {
 const LOGO = `<span class="brand-mark"><svg viewBox="0 0 16 16"><path d="M2 14h3V9H2zm4.5 0h3V6h-3zM11 14h3V2h-3z" fill="#C99A2E"/></svg></span>`;
 const langToggle = () => `<div class="seg lang" role="group" aria-label="Language / Langue"><button data-lang="en" aria-pressed="${getLang() === 'en'}">EN</button><button data-lang="fr" aria-pressed="${getLang() === 'fr'}">FR</button></div>`;
 function shell(active, inner) {
-  const nav = [['#/', t('Portfolio'), 'home'], ['#/income', t('Income'), 'income'], ['#/bills', t('Paycheque'), 'bills'], ['#/plan', t('Projections'), 'plan'], ['#/research', t('Research'), 'research'], ['#/add', t('Add holdings'), 'add'], ['#/settings', t('Settings'), 'settings']];
+  document.body.classList.toggle('help-off', !helpOn());
+  const nav = [['#/', t('Portfolio'), 'home'], ['#/income', t('Income'), 'income'], ['#/bills', t('Paycheque'), 'bills'], ['#/plan', t('Projections'), 'plan'], ['#/research', t('Research'), 'research'], ['#/watch', t('Watchlists'), 'watch'], ['#/add', t('Add holdings'), 'add'], ['#/settings', t('Settings'), 'settings']];
   $('#app').innerHTML = `
   <header class="topbar"><div class="topbar-in">
     <a class="brand" href="#/">${LOGO}Yield Ledger</a>
     <nav class="nav" aria-label="${esc(t('Main'))}">${nav.map(([h, l, k]) => `<a href="${h}" ${k === active ? 'aria-current="page"' : ''}>${esc(l)}</a>`).join('')}</nav>
-    <div class="who">${langToggle()}${S.demo ? `<button class="btn sm" data-act="exit-demo">${t('Sign in')}</button>` : `<span class="email">${esc(S.user?.email)}</span><button class="btn sm ghost" data-act="sign-out">${t('Sign out')}</button>`}</div>
+    <div class="who"><button class="btn sm ghost help-tg" data-act="help-toggle" aria-pressed="${helpOn()}" title="${esc(t('Show or hide the ? explanations next to each field'))}" aria-label="${esc(helpOn() ? t('Help on') : t('Help off'))}"><span class="hq-dot">?</span><span class="lbl">${helpOn() ? t('Help on') : t('Help off')}</span></button>${langToggle()}${S.demo ? `<button class="btn sm" data-act="exit-demo">${t('Sign in')}</button>` : `<span class="email">${esc(S.user?.email)}</span><button class="btn sm ghost" data-act="sign-out">${t('Sign out')}</button>`}</div>
   </div></header>
   ${S.demo ? `<div class="demo-bar"><div><span><b>${t('Demo portfolio.')}</b> ${t('Real tickers, real prices and real dividend history; the holdings are made up. Create an account to track your own.')}</span><button class="btn sm primary" data-act="exit-demo">${t('Create your account')}</button></div></div>` : ''}
   <main id="main">${inner}</main>`;
@@ -276,7 +306,7 @@ const tfsa = () => E.tfsaRoom(S.pf?.settings?.tfsa, S.pf?.positions || [], S.quo
 function tfsaStrip() {
   const hasTfsa = S.pf.positions.some(p => p.account === 'TFSA');
   const r = tfsa();
-  if (!r) return hasTfsa ? `<p class="muted" style="margin:0;font-size:13.5px"><a href="#/settings">${t('Track your TFSA contribution room')} →</a></p>` : '';
+  if (!r) return hasTfsa ? `<p class="muted" style="margin:0;font-size:13.5px"><a href="#/settings#tfsa">${t('Enter your birth year to see how much TFSA room you have left')} →</a></p>` : '';
   const over = r.left < 0;
   return `<div class="alert ${over ? 'bad' : 'good'} tfsa-strip"><i></i><span>${over
     ? t('TFSA over-contribution: {m} over your room. The CRA charges 1% a month on the excess until it is withdrawn or new room arrives.', { m: `<b>${money0(-r.left)}</b>` })
@@ -295,12 +325,12 @@ function xrayRow(r) {
   return `<div class="xr ${ahead ? 'ahead' : 'behind'}">
     <div class="xr-h"><a class="tk" href="#/h/${encodeURIComponent(s.pos.id)}">${esc(s.q.d)}</a> <span class="muted">${t('vs plain {t}', { t: esc(tq.d) })}</span>${r.twinSim.skipped ? ` <span class="chip">${t('partial history')}</span>` : ''}</div>
     <div class="xr-cols">
-      <div><span class="label">${t('Extra dividends from {s}', { s: esc(s.q.d) })}</span><b class="${cls(x.extraIncome)}">${sgnMoney(x.extraIncome)}</b></div>
-      <div><span class="label">${t('Ahead or behind overall')}</span><b class="${cls(x.gap)}">${sgnMoney(x.gap)}</b></div>
+      <div><span class="label">${H('Extra dividends from {s}', { s: esc(s.q.d) })}</span><b class="${cls(x.extraIncome)}">${sgnMoney(x.extraIncome)}</b></div>
+      <div><span class="label">${H('Ahead or behind overall')}</span><b class="${cls(x.gap)}">${sgnMoney(x.gap)}</b></div>
     </div>
     <div class="xr-cols">
-      <div><span class="label">${t('{s} per year', { s: esc(s.q.d) })}</span><b class="${cls(x.xirrA)}">${sgnPct(x.xirrA, 1)}</b></div>
-      <div><span class="label">${t('{s} per year', { s: esc(tq.d) })}</span><b class="${cls(x.xirrB)}">${sgnPct(x.xirrB, 1)}</b></div>
+      <div><span class="label">${H('{s} per year', { s: esc(s.q.d) })}</span><b class="${cls(x.xirrA)}">${sgnPct(x.xirrA, 1)}</b></div>
+      <div><span class="label">${H('{s} per year', { s: esc(tq.d) })}</span><b class="${cls(x.xirrB)}">${sgnPct(x.xirrB, 1)}</b></div>
     </div>
     <p>${ahead ? t('{a} paid you {i} more in dividends and is still {g} ahead overall.', { a: esc(s.q.d), i: money0(Math.abs(x.extraIncome)), g: money0(Math.abs(x.gap)) })
       : x.extraIncome > 0 ? t('{a} paid you {i} more in dividends; plain {b} grew {g} more. That is the income-for-growth trade.', { a: esc(s.q.d), b: esc(tq.d), i: money0(x.extraIncome), g: money0(Math.abs(x.gap)) })
@@ -329,7 +359,7 @@ function placementBlock() {
   const moves = E.placement(S.sims);
   if (!moves.length) return '';
   const save = sum(moves, m => m.save || 0);
-  return `<section class="sec"><div class="sec-head"><h2>${t('Account placement')}</h2>${save ? `<span class="pill-good">${t('Up to {m} a year to keep', { m: money0(save) })}</span>` : ''}</div>
+  return `<section class="sec"><div class="sec-head"><h2>${H('Account placement')}</h2>${save ? `<span class="pill-good">${t('Up to {m} a year to keep', { m: money0(save) })}</span>` : ''}</div>
     <div class="panel stack">${moves.map(m => m.kind === 'us-to-rrsp'
       ? `<div class="move"><b class="mono">${esc(m.s.q.d)}</b><span>${t('In your {a}, 15% of every dividend goes to the IRS for good. Held in an RRSP, that {m} a year would stay with you.', { a: esc(acct(m.s.pos.account)), m: `<b>${money(m.save)}</b>` })}</span></div>`
       : m.kind === 'rrsp-swap'
@@ -359,24 +389,25 @@ function viewPortfolio() {
   <div class="page-head"><div><h1>${t('Portfolio')}</h1><p class="lede">${t('Everything you own, what it is worth today and what it pays you. Tap any holding for the details.')}</p><p>${tp(S.sims.length, '{n} position', '{n} positions')} · ${t('values in CAD')} · ${t('priced {d}', { d: esc(dfmt(S.sims[0]?.q.asof)) })}</p></div>
     <div class="tools"><a class="btn" href="#/add">${t('Add holdings')}</a></div></div>
   ${S.missing.length ? `<div class="alert warn"><i></i><span>${t('Waiting for market data on {s}.', { s: S.missing.map(p => esc(p.sym)).join(', ') })}</span></div>` : ''}
+  ${(() => { const fx = S.sims.filter(s => s.pos.lots.some(l => E.lotReadAsEach(l, s.q))); return fx.length ? `<div class="alert info"><i></i><span>${t('The amount paid for {s} looked like the price of one share, so it is counted as price × shares. If that is wrong, open the holding and re-enter the purchase.', { s: fx.map(s => `<a href="#/h/${encodeURIComponent(s.pos.id)}">${esc(s.q.d)}</a>`).join(', ') })}</span></div>` : ''; })()}
   ${al.length ? `<div class="alerts">${al.slice(0, 5).map(a => `<div class="alert ${a.lvl}"><i></i><span>${esc(a.text)}</span></div>`).join('')}</div>` : ''}
   ${tfsaStrip()}
-  ${guideBlock()}
+  ${payoutAlerts()}
   <section class="kpis" aria-label="${esc(t('Summary'))}">
-    ${kpi(t('Market value'), money0(T.valueCad), t('{m} of it from DRIP shares', { m: money0(T.dripValue) }))}
-    ${kpi(t('Capital invested'), money0(T.investedCad), t('Your own money in, excluding reinvested dividends'))}
-    ${kpi(t('Total return'), `<span class="${cls(T.totalCad)}">${sgnMoney(T.totalCad)}</span>`, `<span class="${cls(T.totalPct)}">${sgnPct(T.totalPct)}</span> ${t('total')} · <span class="${cls(T.xirr)}">${sgnPct(T.xirr)}</span> ${t('a year')}`)}
-    ${kpi(t('Yield on cost'), pct(T.yoc), t('Current yield {y}', { y: pct(T.yld) }))}
-    ${kpi(t('Forward income'), money(T.fwd), t('{m} a month on average', { m: money(T.fwd / 12) }), 'income')}
-    ${kpi(t('Dividends, last 12 months'), money(T.last12), t('{m} since you started', { m: money(T.divAll) }), 'income')}
-    ${kpi(t('Reinvested by DRIP'), money(T.reinvCad), t('{n} shares added', { n: shares(sum(S.sims, s => s.dripShares)) }))}
-    ${kpi(t('US withholding lost'), money(T.whtLost), T.whtLost > 0 ? t('A year, in TFSA/FHSA/RESP') : t('None at the moment'))}
+    ${kpi(H('Market value'), money0(T.valueCad), t('{m} of it from DRIP shares', { m: money0(T.dripValue) }))}
+    ${kpi(H('Capital invested'), money0(T.investedCad), t('Your own money in, excluding reinvested dividends'))}
+    ${kpi(H('Total return'), `<span class="${cls(T.totalCad)}">${sgnMoney(T.totalCad)}</span>`, `<span class="${cls(T.totalPct)}">${sgnPct(T.totalPct)}</span> ${t('total')} · <span class="${cls(T.xirr)}">${sgnPct(T.xirr)}</span> ${t('a year')}`)}
+    ${kpi(H('Yield on cost'), pct(T.yoc), t('Current yield {y}', { y: pct(T.yld) }))}
+    ${kpi(H('Forward income'), money(T.fwd), t('{m} a month on average', { m: money(T.fwd / 12) }), 'income')}
+    ${kpi(H('Dividends, last 12 months'), money(T.last12), t('{m} since you started', { m: money(T.divAll) }), 'income')}
+    ${kpi(H('Reinvested by DRIP'), money(T.reinvCad), t('{n} shares added', { n: shares(sum(S.sims, s => s.dripShares)) }))}
+    ${kpi(H('US withholding lost'), money(T.whtLost), T.whtLost > 0 ? t('A year, in TFSA/FHSA/RESP') : t('None at the moment'))}
   </section>
-  <section class="sec"><div class="sec-head"><h2>${t('Value and capital')}</h2><span class="muted" style="font-size:13px">${t('The space between the two lines is your gain')}</span><div class="legend"><span><i class="sw c1"></i>${t('Market value')}</span><span><i class="sw c2"></i>${t('Capital invested')}</span></div></div>
+  <section class="sec"><div class="sec-head"><h2>${H('Value and capital')}</h2><span class="muted" style="font-size:13px">${t('The space between the two lines is your gain')}</span><div class="legend"><span><i class="sw c1"></i>${t('Market value')}</span><span><i class="sw c2"></i>${t('Capital invested')}</span></div></div>
     <div class="panel"><div id="ch-value"></div></div></section>
-  ${xr.length ? `<section class="sec"><div class="sec-head"><h2>${t('Yield X-ray')}</h2><span class="muted" style="font-size:13px">${t('Your high-yield funds against the plain fund they are built on, same dollars, same dates')}</span></div><div class="xr-grid">${xr.map(xrayRow).join('')}</div></section>` : ''}
+  ${xr.length ? `<section class="sec"><div class="sec-head"><h2>${H('Yield X-ray')}</h2><span class="muted" style="font-size:13px">${t('Your high-yield funds against the plain fund they are built on, same dollars, same dates')}</span></div><div class="xr-grid">${xr.map(xrayRow).join('')}</div></section>` : ''}
   <section class="sec"><div class="sec-head"><h2>${t('Holdings')}</h2><span class="muted" style="font-size:13px">${t('Tap a holding for its research note, what-if replays and DRIP ledger')}</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Holding')}</th><th>${t('Value')}</th><th>${t('Shares bought → now')}</th><th>${t('Yield · on cost')}</th><th>${t('Income / yr')}</th><th>${t('Total return')}</th><th>${t('Score')}</th></tr></thead><tbody>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${H('Holding')}</th><th>${H('Value')}</th><th>${H('Shares bought → now')}</th><th>${H('Yield · on cost')}</th><th>${H('Income / yr')}</th><th>${H('Total return')}</th><th>${H('Score')}</th></tr></thead><tbody>
     ${sims.map(s => `<tr class="link" data-href="#/h/${encodeURIComponent(s.pos.id)}">
       <td class="txt"><a class="tk" href="#/h/${encodeURIComponent(s.pos.id)}">${esc(s.q.d)}</a><span class="nm">${esc(s.q.name)}</span>${holdingChips(s)}</td>
       <td>${money0(s.valueCad)}<small>${pct(T.valueCad ? s.valueCad / T.valueCad : NaN, 1)}</small></td>
@@ -399,27 +430,8 @@ function viewPortfolio() {
     tip: i => `<b>${mfmt(months[i])}</b><div class="r"><span>${t('Value')}</span><span>${money0(val[i])}</span></div><div class="r"><span>${t('Capital')}</span><span>${money0(inv[i])}</span></div><div class="r"><span>${t('Gain')}</span><span>${sgnMoney(val[i] - inv[i])}</span></div>`,
   });
   else $('#ch-value').innerHTML = `<p class="muted" style="margin:0">${t('The chart fills in after your first full month.')}</p>`;
-  $('#guide')?.addEventListener('toggle', e => store.set('yl.guide', e.target.open ? '1' : '0'));
   drawVsGrowth();
 }
-const GUIDE = [
-  ['Market value', 'What your holdings would sell for today, in Canadian dollars.'],
-  ['Capital invested', 'The money you put in yourself. Reinvested dividends are not counted, so the gap to market value is your real gain.'],
-  ['Total return', 'Price gains plus every dividend, in dollars and as a yearly rate that accounts for when you added money.'],
-  ['Yield on cost', 'Your yearly dividends as a share of what you paid. It rises as payouts grow, even if the price does not.'],
-  ['Forward income', 'What your holdings should pay over the next 12 months at today’s rates, after US withholding.'],
-  ['Reinvested by DRIP', 'Dividends that bought more shares automatically, and how many shares that added.'],
-  ['US withholding lost', 'The 15% the US keeps on US dividends in a TFSA, FHSA or RESP. It cannot be recovered.'],
-  ['Yield X-ray', 'Covered-call and high-yield funds compared with the plain fund they are built on. Shows whether the extra income cost you growth.'],
-  ['Account placement', 'Holdings that would be taxed less in a different account, and by how much.'],
-  ['Dividends vs growth', 'The same dollars on the same dates put into a growth index instead, to see what the dividend focus gained or cost you.'],
-];
-function guideBlock() {
-  const open = store.get('yl.guide') !== '0';
-  return `<details class="guide panel" id="guide" ${open ? 'open' : ''}><summary>${t('How to read this page')}</summary>
-    <dl>${GUIDE.map(([k, v]) => `<div><dt>${t(k)}</dt><dd>${t(v)}</dd></div>`).join('')}</dl></details>`;
-}
-
 /* ------------------------------------------------------------ dividends vs growth */
 const BENCH = [['VFV.TO', 'S&P 500'], ['QQC.TO', 'Nasdaq 100'], ['XIU.TO', 'TSX 60']];
 const benchList = () => BENCH.filter(([s]) => S.rows.some(r => r.s === s));
@@ -439,7 +451,7 @@ async function drawVsGrowth() {
   const incA = sum(mine, s => s.fwdNetCad), incB = sum(alt, s => s.fwdNetCad);
   const divA = sum(mine, s => s.divNetCad), divB = sum(alt, s => s.divNetCad);
   const name = list.find(([s]) => s === benchPick)[1], bd = bq.d;
-  el.innerHTML = `<div class="sec-head"><h2>${t('Dividends vs growth')}</h2><span class="muted" style="font-size:13px">${t('Your exact purchases, put into an index fund instead')}</span></div>
+  el.innerHTML = `<div class="sec-head"><h2>${H('Dividends vs growth')}</h2><span class="muted" style="font-size:13px">${t('Your exact purchases, put into an index fund instead')}</span></div>
     <div class="panel stack">
       <div class="seg" role="group" aria-label="${esc(t('Compare with'))}">${list.map(([s, n]) => `<button data-bench="${s}" aria-pressed="${s === benchPick}">${esc(n)} · ${esc(s.replace('.TO', ''))}</button>`).join('')}</div>
       <div class="xr-cmp">
@@ -482,10 +494,10 @@ function viewIncome() {
   shell('income', `
   <div class="page-head"><div><h1>${t('Dividend income')}</h1><p>${t('After US withholding, in CAD. DRIP growth is already counted in the share counts.')}</p></div></div>
   <section class="kpis">
-    ${kpi(t('Last 12 months'), money(T.last12), t('Received'), 'income')}
-    ${kpi(t('Next 12 months'), money(nextTot), t('Expected at current rates'), 'income')}
-    ${kpi(t('Average month ahead'), money(avgNext), goal ? t('{p} of your {g} monthly goal', { p: pct(avgNext / goal, 0), g: money0(goal) }) : t('Set a monthly goal in Settings'))}
-    ${kpi(t('Since you started'), money(T.divAll), t('{m} reinvested', { m: money(T.reinvCad) }))}
+    ${kpi(H('Last 12 months'), money(T.last12), t('Received'), 'income')}
+    ${kpi(H('Next 12 months'), money(nextTot), t('Expected at current rates'), 'income')}
+    ${kpi(H('Average month ahead'), money(avgNext), goal ? t('{p} of your {g} monthly goal', { p: pct(avgNext / goal, 0), g: money0(goal) }) : t('Set a monthly goal in Settings'))}
+    ${kpi(H('Since you started'), money(T.divAll), t('{m} reinvested', { m: money(T.reinvCad) }))}
   </section>
   <section class="sec"><div class="sec-head"><h2>${t('By month')}</h2><div class="legend"><span><i class="sw gb"></i>${t('Received')}</span><span><i class="sw proj"></i>${t('Expected')}</span></div></div>
     <div class="panel"><div id="ch-inc"></div>
@@ -496,7 +508,7 @@ function viewIncome() {
       return `<div class="cal-m"><header><b>${mfmt(m)}</b><span>${money(sum(ps, p => p.netCad))}</span></header><ul>${ps.length ? ps.map(p => `<li><span><span class="mono">${esc(p.d)}</span> <span class="muted">~${+p.pay.slice(8)}</span></span><span>${money(p.netCad)}</span></li>`).join('') : `<li class="muted">${t('No payments expected')}</li>`}</ul></div>`;
     }).join('')}</div></section>
   <section class="sec"><div class="sec-head"><h2>${t('Every payment')}</h2><span class="muted" style="font-size:13px">${t('{n} payments replayed', { n: ledger.length })}</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Paid (est.)')}</th><th>${t('Holding')}</th><th>${t('Shares held')}</th><th>${t('Per share')}</th><th>${t('Withheld')}</th><th>${t('Net (CAD)')}</th><th>${t('DRIP shares')}</th></tr></thead>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${H('Paid (est.)')}</th><th>${H('Holding')}</th><th>${H('Shares held')}</th><th>${H('Per share')}</th><th>${H('Withheld')}</th><th>${H('Net (CAD)')}</th><th>${H('DRIP shares')}</th></tr></thead>
     <tbody id="led-body">${ledgerRows(ledger.slice(0, 60))}</tbody></table></div>
     ${ledger.length > 60 ? `<button class="btn" id="led-more" style="justify-self:start">${t('Show all {n}', { n: ledger.length })}</button>` : ''}</section>
   ${dataFoot()}`);
@@ -538,9 +550,9 @@ function viewBills() {
   <section class="pay-hero panel"><p class="hero-line">${headline}</p>
     <div class="foot-stats"><span>${t('Average month ahead')} <b>${money(avg)}</b></span><span>${t('Monthly bills')} <b>${money(totalBills)}</b></span><span>${t('Covered')} <b>${pct(totalBills ? Math.min(1, avg / totalBills) : 0, 0)}</b></span></div></section>
   ${nextUp ? `<section class="kpis kpis3">
-    ${kpi(t('Next bill to take over'), esc(t(nextUp.name)), t('{m} a month still to cover', { m: money(need) }))}
-    ${kpi(t('Extra invested to get there'), money0(capNeeded), t('At your portfolio’s current net yield of {y}', { y: pct(yieldNet) }))}
-    ${kpi(t('Or with DRIP alone'), dripEta(need), t('Using each holding’s own 5-year dividend growth, halved'))}
+    ${kpi(H('Next bill to take over'), esc(t(nextUp.name)), t('{m} a month still to cover', { m: money(need) }))}
+    ${kpi(H('Extra invested to get there'), money0(capNeeded), t('At your portfolio’s current net yield of {y}', { y: pct(yieldNet) }))}
+    ${kpi(H('Or with DRIP alone'), dripEta(need), t('Using each holding’s own 5-year dividend growth, halved'))}
   </section>` : ''}
   <section class="cols">
     <div class="sec"><h2 style="font-size:18px">${t('Your bills')}</h2><div class="panel stack" id="bill-list">
@@ -554,7 +566,7 @@ function viewBills() {
       <div class="chips">${BILL_PRESETS.filter(([n]) => !bills.some(b => b.name === n || b.name === t(n))).map(([n, a]) => `<button class="chip-btn" data-act="bill-preset" data-n="${esc(t(n))}" data-a="${a}">+ ${esc(t(n))}</button>`).join('')}</div>
     </div></div>
     <div class="sec"><h2 style="font-size:18px">${t('Month by month')}</h2><div class="panel"><div id="ch-bills"></div>
-      <div class="tbl-wrap" style="margin-top:12px;border:0"><table class="tbl"><thead><tr><th>${t('Month')}</th><th>${t('Dividends')}</th><th>${t('Bills paid')}</th></tr></thead><tbody>
+      <div class="tbl-wrap" style="margin-top:12px;border:0"><table class="tbl"><thead><tr><th>${t('Month')}</th><th>${H('Dividends')}</th><th>${H('Bills paid')}</th></tr></thead><tbody>
       ${n12.map(x => { const full = E.coverBills(bills, x.v).filter(b => b.share >= 0.999); return `<tr><td>${mfmt(x.m)}</td><td class="gold">${money(x.v)}</td><td class="txt">${full.length ? full.map(b => esc(t(b.name))).join(', ') : '<span class="muted">—</span>'}</td></tr>`; }).join('')}
       </tbody></table></div></div></div>
   </section>
@@ -589,7 +601,7 @@ function viewPlan() {
     <div class="field"><label for="pl-m">${t('Monthly contribution ($)')}</label><input id="pl-m" type="number" min="0" step="50" inputmode="decimal" value="${o.monthly}"></div>
     <div class="field"><label for="pl-y">${t('Years')}</label><select id="pl-y">${[5, 10, 15, 20, 25, 30].map(y => `<option ${y === o.years ? 'selected' : ''}>${y}</option>`).join('')}</select></div>
     <div class="field"><label for="pl-h">${t('Growth assumption')}</label><select id="pl-h"><option value="0" ${o.haircut === 0 ? 'selected' : ''}>${t('Each holding’s own 5-year history')}</option><option value="0.5" ${o.haircut === 0.5 ? 'selected' : ''}>${t('Conservative: half of history')}</option><option value="1" ${o.haircut === 1 ? 'selected' : ''}>${t('No growth at all')}</option></select></div>
-    <div class="field"><label for="pl-d">${t('Dividends')}</label><select id="pl-d"><option value="1" ${o.drip ? 'selected' : ''}>${t('Reinvest (DRIP)')}</option><option value="0" ${!o.drip ? 'selected' : ''}>${t('Take as cash')}</option></select></div>
+    <div class="field"><label for="pl-d">${H('Dividends')}</label><select id="pl-d"><option value="1" ${o.drip ? 'selected' : ''}>${t('Reinvest (DRIP)')}</option><option value="0" ${!o.drip ? 'selected' : ''}>${t('Take as cash')}</option></select></div>
   </div></div>
   <div id="plan-out" class="sec" style="gap:20px"></div>
   ${dataFoot()}`);
@@ -602,17 +614,17 @@ function viewPlan() {
     const yr = new Date().getFullYear();
     $('#plan-out').innerHTML = `
     <section class="kpis">
-      ${kpi(t('Monthly income in year {n}', { n: o.years }), money0(end.monthly), t('Today {m} a month', { m: money0(rows[0].monthly) }), 'income')}
-      ${kpi(t('Portfolio in year {n}', { n: o.years }), money0(end.value), t('{m} of it contributed', { m: money0(end.contributed) }))}
-      ${kpi(t('Monthly goal'), goal ? money0(goal) : t('Not set'), goal ? (hit ? t('Reached in year {n} ({y})', { n: hit.year, y: yr + hit.year }) : t('Not reached in {n} years', { n: o.years })) : t('Set one in Settings'))}
-      ${kpi(t('Income taken as cash'), money0(end.cashTaken), o.drip ? t('Everything reinvested') : t('Over the whole period'))}
+      ${kpi(H('Monthly income in year {n}', { n: o.years }), money0(end.monthly), t('Today {m} a month', { m: money0(rows[0].monthly) }), 'income')}
+      ${kpi(H('Portfolio in year {n}', { n: o.years }), money0(end.value), t('{m} of it contributed', { m: money0(end.contributed) }))}
+      ${kpi(H('Monthly goal'), goal ? money0(goal) : t('Not set'), goal ? (hit ? t('Reached in year {n} ({y})', { n: hit.year, y: yr + hit.year }) : t('Not reached in {n} years', { n: o.years })) : t('Set one in Settings'))}
+      ${kpi(H('Income taken as cash'), money0(end.cashTaken), o.drip ? t('Everything reinvested') : t('Over the whole period'))}
     </section>
     ${ideasBlock(o, goal)}
     <section class="cols">
       <div class="sec"><h2 style="font-size:18px">${t('Monthly income by year')}</h2><div class="panel"><div id="ch-pinc"></div></div></div>
       <div class="sec"><h2 style="font-size:18px">${t('Portfolio value')}</h2><div class="panel"><div id="ch-pval"></div></div></div>
     </section>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Year')}</th><th>${t('Portfolio')}</th><th>${t('Contributed')}</th><th>${t('Income / yr')}</th><th>${t('Income / mo')}</th></tr></thead><tbody>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Year')}</th><th>${t('Portfolio')}</th><th>${H('Contributed')}</th><th>${H('Income / yr')}</th><th>${H('Income / mo')}</th></tr></thead><tbody>
     ${rows.filter(r => r.year % (o.years > 15 ? 5 : 1) === 0 || r.year === o.years).map(r => `<tr><td>${r.year === 0 ? t('Today') : t('Year {n} · {y}', { n: r.year, y: yr + r.year })}</td><td>${money0(r.value)}</td><td>${money0(r.contributed)}</td><td>${money0(r.income)}</td><td class="gold">${money0(r.monthly)}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="margin:0;font-size:13px">${t('Dividend growth is capped between −5% and +8% a year and price growth between −6% and +8% a year per holding, so one hot stretch of history doesn’t run away with the forecast. Projections are estimates, not promises.')} ${t('A holding’s yield is also kept within 1.5 times today’s, because payouts that outrun a falling price usually get cut.')}</p>`;
@@ -723,13 +735,14 @@ function rowCells(r, extra = '') {
 }
 const VAL_LBL = { cheap: 'Cheap vs its history', fair: 'Fair vs its history', expensive: 'Pricey vs its history' };
 const valChip = v => (v && (v.kind === 'cheap' || v.kind === 'expensive') ? ` <span class="chip val-${v.kind}" title="${esc(t('Based on its yield and price against its own past, not a recommendation'))}">${esc(t(VAL_LBL[v.kind]))}</span>` : '');
+const COLHELP = { p1: 'Price, 1 year', y: 'Yield', keep: 'You keep in {a}', tr1: '1-year return', g1: '1-year dividend growth', tr5: '5-year return', mer: 'Fee', sc: 'Score' };
 const COLS = () => [['p1', t('Price, 1 year')], ['y', t('Yield')], ['keep', t('You keep in {a}', { a: acct(RS.acct) })], ['tr1', t('1-year return')], ['g1', t('1-year dividend growth')], ['tr5', t('5-year return')], ['mer', t('Fee')], ['sc', t('Score')]];
 function sortRows(rows, def) {
   const k = RS.sort || def;
   const val = r => (k === 'keep' ? E.keep(r, RS.acct).kept : k === 'w' ? r._w : k === 'aum' ? (r.aum || 0) * (r.cur === 'USD' ? 1.37 : 1) : r[k]);
   return rows.sort((a, b) => ((val(a) ?? -1e9) - (val(b) ?? -1e9)) * (RS.sort ? RS.dir : -1));
 }
-function head(extra = '') { return `<thead><tr><th>${t('Security')}</th>${extra}${COLS().map(([k, l]) => `<th><button data-sort="${k}">${esc(l)}${RS.sort === k ? (RS.dir < 0 ? ' ↓' : ' ↑') : ''}</button></th>`).join('')}<th></th></tr></thead>`; }
+function head(extra = '') { return `<thead><tr><th>${t('Security')}</th>${extra}${COLS().map(([k, l]) => `<th><button data-sort="${k}">${esc(l)}${RS.sort === k ? (RS.dir < 0 ? ' ↓' : ' ↑') : ''}</button>${hq(COLHELP[k])}</th>`).join('')}<th></th></tr></thead>`; }
 const limited = rows => rows.slice(0, RS.limit);
 const moreBtn = rows => (rows.length > RS.limit ? `<button class="btn" data-more="1" style="justify-self:start">${t('Show {n} more', { n: Math.min(200, rows.length - RS.limit) })} · ${t('{n} in total', { n: rows.length })}</button>` : '');
 function median(a) { const v = a.filter(fin).sort((x, y) => x - y); return v.length ? v[Math.floor(v.length / 2)] : NaN; }
@@ -872,7 +885,7 @@ function canadianAlternatives(q) {
   const self = { r: S.rows.find(r => r.s === q.s) || { s: q.s, d: q.d, n: q.name, y: q.st?.yld, wh: q.wh, ex: q.ex, tr1: q.st?.tr1, tr5: q.st?.tr5, mer: q.f?.mer }, why: t('This security') };
   const rowH = ({ r, why }) => { const kt = E.keep(r, 'TFSA'), kr = E.keep(r, 'RRSP'); return `<tr class="${r.s === q.s ? 'hl-row' : 'link'}" ${r.s === q.s ? '' : `data-href="#/t/${encodeURIComponent(r.s)}"`}><td class="txt"><a class="tk" href="#/t/${encodeURIComponent(r.s)}">${esc(r.d)}</a>${whChip(r)}<span class="nm">${esc(r.n)}</span><small>${why}</small></td><td>${pct(r.y)}</td><td>${pct(kt.kept)}</td><td>${pct(kr.kept)}</td><td>${r.ex === 'US' ? pct(E.FX_FEE, 1) : '—'}</td><td class="${cls(r.tr1)}">${sgnPct(r.tr1, 1)}</td><td class="${cls(r.tr5)}">${sgnPct(r.tr5, 1)}</td><td>${r.mer != null ? num(r.mer, 2) + ' %' : '—'}</td></tr>`; };
   return `<section class="sec"><div class="sec-head"><h2>${t('Canadian alternatives')}</h2><span class="muted" style="font-size:13px">${t('Same exposure without the currency conversion, and what each keeps per account')}</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Security')}</th><th>${t('Yield')}</th><th>${t('You keep in {a}', { a: acct('TFSA') })}</th><th>${t('You keep in {a}', { a: acct('RRSP') })}</th><th>${t('Currency cost')}</th><th>${t('1-year return')}</th><th>${t('5-year return')}</th><th>${t('Fee')}</th></tr></thead>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Security')}</th><th>${H('Yield')}</th><th>${H('You keep in {a}', { a: acct('TFSA') })}</th><th>${H('You keep in {a}', { a: acct('RRSP') })}</th><th>${H('Currency cost')}</th><th>${H('1-year return')}</th><th>${H('5-year return')}</th><th>${H('Fee')}</th></tr></thead>
     <tbody>${[self, ...list].map(rowH).join('')}</tbody></table></div>
     <p class="muted" style="margin:0;font-size:13px">${t('Rule of thumb: US-listed in an RRSP, Canadian-listed in a TFSA if you want to skip currency conversion. Compare the kept yield and the 5-year return, not the headline yield.')}</p></section>`;
 }
@@ -894,7 +907,7 @@ function taxPanel(q) {
   if (q.wh === 'CA-US' && !E.US_EQUIV[q.s]) notes.push(t('Priced in CAD, so no currency conversion when you buy. The trade-off is the 15% kept inside the fund, which an RRSP cannot avoid.'));
   if (q.wh === 'CDR') notes.push(t('Priced in CAD with no currency conversion and a built-in currency hedge. Because the depositary bank is the shareholder of record, the RRSP exemption does not apply.'));
   return `<section class="sec"><div class="sec-head"><h2>${t('Tax and currency for Canadians')}</h2><span class="muted" style="font-size:13px">${t('What you keep of the {y} yield in each account', { y: pct(row.y) })}</span></div>
-    <div class="panel stack"><div class="tbl-wrap" style="border:0"><table class="tbl left"><thead><tr><th>${t('Account')}</th><th>${t('You keep')}</th><th>${t('Why')}</th></tr></thead><tbody>${lines}</tbody></table></div>
+    <div class="panel stack"><div class="tbl-wrap" style="border:0"><table class="tbl left"><thead><tr><th>${H('Account')}</th><th>${t('You keep')}</th><th>${t('Why')}</th></tr></thead><tbody>${lines}</tbody></table></div>
     ${notes.map(n => `<p style="margin:0">${n}</p>`).join('')}</div></section>`;
 }
 
@@ -924,18 +937,18 @@ async function viewDetail({ posId, sym }) {
       <div class="chips"><span class="chip">${q.ex === 'CA' ? 'TSX' : 'US'} · ${esc(q.cur)}</span><span class="chip">${esc(t(q.type))}</span><span class="chip">${t('Pays {f}', { f: E.freqName(st.freq, t).toLowerCase() })}</span>${f.sector ? `<span class="chip">${esc(f.sector)}</span>` : ''}${f.category ? `<span class="chip">${esc(f.category)}</span>` : ''}${st.erosion ? `<span class="chip warn">${t('NAV erosion')}</span>` : ''}${st.lastChg != null && st.lastChg < -0.05 ? `<span class="chip bad">${t('Latest payment cut')}</span>` : ''}</div>
     </div>
     <div class="px-big"><div class="v">${nat(q.px, q.cur)}</div><div class="muted" style="font-size:13px">${t('Close {d} · yield {y}', { d: esc(dfmt(q.asof)), y: pct(st.fyld) })}</div>
-      ${!posId ? `<a class="btn primary sm" href="#/add" data-prefill="${esc(q.s)}" style="margin-top:8px">${t('Add to portfolio')}</a>` : ''}</div>
+      <div class="tools" style="justify-content:flex-end;gap:6px">${!posId ? `<a class="btn primary sm" href="#/add" data-prefill="${esc(q.s)}" style="margin-top:8px">${t('Add to portfolio')}</a>` : ''}${watchButton(q.s)}</div></div>
   </div>
   ${sim ? `
   <section class="kpis">
-    ${kpi(t('Shares bought → now'), `${shares(sim.startShares)} → ${shares(sim.shares)}`, t('+{n} from DRIP ({p})', { n: shares(sim.dripShares), p: pct(sim.startShares ? sim.dripShares / sim.startShares : 0, 1) }))}
-    ${kpi(t('Market value'), money(sim.valueCad), sim.cur === 'USD' ? t('{v} at {r}', { v: nat(sim.value, 'USD'), r: num(sim.rNow, 4) }) : `${esc(acct(sim.pos.account))} · ${esc(DRIP()[sim.pos.drip])}`)}
-    ${kpi(t('Capital invested'), money(sim.investedCad), t('Since {d}', { d: esc(dfmt(sim.firstDate)) }))}
-    ${kpi(t('Total return'), `<span class="${cls(sim.totalCad)}">${sgnMoney(sim.totalCad)}</span>`, `<span class="${cls(sim.totalPct)}">${sgnPct(sim.totalPct)}</span> · <span class="${cls(sim.xirr)}">${sgnPct(sim.xirr)}</span> ${t('a year')}`)}
-    ${kpi(t('Dividends received'), money(sim.divNetCad), t('{m} reinvested', { m: money(sim.reinvested * sim.rNow) }) + (sim.whtTotal ? ' · ' + t('{m} withheld', { m: money(sim.whtCad) }) : ''), 'income')}
-    ${kpi(t('Forward income'), money(sim.fwdNetCad), t('{m} a month', { m: money(sim.fwdNetCad / 12) }), 'income')}
-    ${kpi(t('Yield on cost'), pct(sim.yoc), t('Current yield {y}', { y: pct(sim.yld) }))}
-    ${kpi(t('Price gain'), `<span class="${cls(sim.priceGainCad)}">${sgnMoney(sim.priceGainCad)}</span>`, t('Value minus capital and reinvested dividends'))}
+    ${kpi(H('Shares bought → now'), `${shares(sim.startShares)} → ${shares(sim.shares)}`, t('+{n} from DRIP ({p})', { n: shares(sim.dripShares), p: pct(sim.startShares ? sim.dripShares / sim.startShares : 0, 1) }))}
+    ${kpi(H('Market value'), money(sim.valueCad), sim.cur === 'USD' ? t('{v} at {r}', { v: nat(sim.value, 'USD'), r: num(sim.rNow, 4) }) : `${esc(acct(sim.pos.account))} · ${esc(DRIP()[sim.pos.drip])}`)}
+    ${kpi(H('Capital invested'), money(sim.investedCad), t('Since {d}', { d: esc(dfmt(sim.firstDate)) }))}
+    ${kpi(H('Total return'), `<span class="${cls(sim.totalCad)}">${sgnMoney(sim.totalCad)}</span>`, `<span class="${cls(sim.totalPct)}">${sgnPct(sim.totalPct)}</span> · <span class="${cls(sim.xirr)}">${sgnPct(sim.xirr)}</span> ${t('a year')}`)}
+    ${kpi(H('Dividends received'), money(sim.divNetCad), t('{m} reinvested', { m: money(sim.reinvested * sim.rNow) }) + (sim.whtTotal ? ' · ' + t('{m} withheld', { m: money(sim.whtCad) }) : ''), 'income')}
+    ${kpi(H('Forward income'), money(sim.fwdNetCad), t('{m} a month', { m: money(sim.fwdNetCad / 12) }), 'income')}
+    ${kpi(H('Yield on cost'), pct(sim.yoc), t('Current yield {y}', { y: pct(sim.yld) }))}
+    ${kpi(H('Price gain'), `<span class="${cls(sim.priceGainCad)}">${sgnMoney(sim.priceGainCad)}</span>`, t('Value minus capital and reinvested dividends'))}
   </section>
   <section class="cols">
     <div class="sec"><div class="sec-head"><h2 style="font-size:18px">${t('Your position')}</h2><div class="legend"><span><i class="sw c1"></i>${t('Value')}</span><span><i class="sw c2"></i>${t('Capital')}</span></div></div><div class="panel"><div id="ch-pos"></div></div></div>
@@ -943,6 +956,7 @@ async function viewDetail({ posId, sym }) {
   </section>` : ''}
   ${q.approx ? `<div class="alert info"><i></i><span>${t('Yahoo publishes a price for this CDR but no history, so its history here is rebuilt from {b} at the CDR’s current ratio. Recent prices are exact; older ones are close but not exact.', { b: esc(q.approx) })}</span></div>` : ''}
   ${valuationPanel(q)}
+  ${taPanel(q)}
   ${tx ? xrayDetail(q, twinQ, tx) : ''}
   ${!sim ? `<section class="sec" id="vs-growth-q"></section>` : ''}
   ${taxPanel(q)}
@@ -982,6 +996,7 @@ async function viewDetail({ posId, sym }) {
   barChart($('#ch-ann'), { x: ann.map(a => String(a[0])), v: ann.map(a => a[1]), cls: ann.map(a => (a[0] === new Date().getFullYear() ? 'proj' : '')), fmtY: natS, fmtX: y => '’' + y.slice(2), tip: i => `<b>${ann[i][0]}</b><div>${t('{v} per share', { v: nat(ann[i][1], q.cur) })}</div>` });
   priceChart($('#ch-px'), q, 5);
   drawYieldHistory(q);
+  drawTA(q);
   if (tx) drawXrayChart(tx, q, twinQ);
   if (!sim) drawGrowthForQuote(q);
   if (sim) {
@@ -1017,7 +1032,7 @@ async function drawGrowthForQuote(q) {
   if (!bq || !$('#vs-growth-q')) return;
   const h = E.headToHead(q, bq, S.fx), a = E.outcome(h.a), b = E.outcome(h.b), gap = b - a;
   const yrs = Math.max(1, Math.round(h.years));
-  el.innerHTML = `<div class="sec-head"><h2>${t('Dividends vs growth')}</h2><span class="muted" style="font-size:13px">${t('{m} put into each on {d}, dividends reinvested, in a TFSA', { m: money0(10000), d: esc(dfmt(h.start)) })}</span></div>
+  el.innerHTML = `<div class="sec-head"><h2>${H('Dividends vs growth')}</h2><span class="muted" style="font-size:13px">${t('{m} put into each on {d}, dividends reinvested, in a TFSA', { m: money0(10000), d: esc(dfmt(h.start)) })}</span></div>
     <div class="panel stack"><div class="chips">${list.map(([sy, n]) => `<button class="chip-btn ${sy === qBench ? 'on' : ''}" data-qb="${esc(sy)}">${esc(n)}</button>`).join('')}</div>
     <div class="xr-cmp">
       <div><span class="label">${esc(q.d)}</span><b>${money0(a)}</b><small>${t('{i} in dividends', { i: money0(h.a.divNetCad) })} · ${sgnPct(h.a.xirr, 1)}${t('/yr')}</small></div>
@@ -1079,7 +1094,7 @@ function xrayDetail(q, twinQ, tx) {
     : extra > 0 ? t('{a} paid {i} more in dividends; plain {b} grew {g} more. That is the trade the option strategy makes: steadier cash now for less growth.', { a: esc(q.d), b: esc(twinQ.d), i: money0(extra), g: money0(-gap) })
     : t('Plain {b} came out ahead on both income and total return.', { b: esc(twinQ.d) });
   const pc = E.samePaycheque(a, twinQ, S.fx);
-  return `<section class="sec"><div class="sec-head"><h2>${t('Yield X-ray')}</h2><span class="muted" style="font-size:13px">${t('{a} vs its plain twin {b}', { a: esc(q.d), b: esc(twinQ.d) })}</span></div>
+  return `<section class="sec"><div class="sec-head"><h2>${H('Yield X-ray')}</h2><span class="muted" style="font-size:13px">${t('{a} vs its plain twin {b}', { a: esc(q.d), b: esc(twinQ.d) })}</span></div>
     <div class="panel stack"><p style="margin:0">${intro}${b.skipped ? ' ' + t('Part of your history predates {b}’s data, so those purchases are left out of its side.', { b: esc(twinQ.d) }) : ''}</p>
     <div class="xr-cmp">
       <div><span class="label">${esc(q.d)}</span><b>${money0(endA)}</b><small>${t('{i} in dividends', { i: money0(a.divNetCad) })} · ${sgnPct(a.xirr, 1)}${t('/yr')}</small></div>
@@ -1124,7 +1139,7 @@ function drawWhatIf(sim, twinQ) {
         + ' ' + (dv >= 0 ? t('You collected {d} more in dividends and earn {i} more a year now.', { d: money0(dv), i: money0(Math.max(0, inc)) }) : t('It would also have paid you {d} more in dividends.', { d: money0(-dv) }))
         + (alt.sim.skipped ? ' ' + t('Some purchases predate its history and are left out.') : '');
     } else if (sumEl) sumEl.hidden = true;
-    $('#wi-out').innerHTML = `<table class="tbl"><thead><tr><th>${t('Scenario')}</th><th>${t('Value today')}</th><th>${t('Dividends')}</th><th>${t('Total return')}</th><th>${t('Per year')}</th><th>${t('Income / yr')}</th><th>${t('vs actual')}</th></tr></thead><tbody>
+    $('#wi-out').innerHTML = `<table class="tbl"><thead><tr><th>${t('Scenario')}</th><th>${t('Value today')}</th><th>${H('Dividends')}</th><th>${H('Total return')}</th><th>${t('Per year')}</th><th>${H('Income / yr')}</th><th>${t('vs actual')}</th></tr></thead><tbody>
       ${sc.map(x => `<tr${x.key === 'actual' ? ' class="hl-row"' : ''}><td class="txt">${label(x)}</td><td>${money0(x.sim.valueCad)}</td><td class="gold">${money0(x.sim.divNetCad)}</td><td class="${cls(x.sim.totalCad)}">${sgnMoney(x.sim.totalCad)}</td><td class="${cls(x.sim.xirr)}">${sgnPct(x.sim.xirr, 1)}</td><td>${money0(x.sim.fwdNetCad)}</td><td class="${cls(x.sim.totalCad - base)}">${x.key === 'actual' ? '—' : sgnMoney(x.sim.totalCad - base)}</td></tr>`).join('')}
       </tbody></table>`;
   })();
@@ -1133,25 +1148,25 @@ function positionAdmin(sim) {
   const p = sim.pos, rows = sim.ledger.slice().reverse();
   return `
   <section class="sec"><div class="sec-head"><h2>${t('DRIP ledger')}</h2><span class="muted" style="font-size:13px">${t('Every buy, sale, dividend and reinvestment, replayed')}</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Date')}</th><th>${t('Event')}</th><th>${t('Shares held')}</th><th>${t('Per share')}</th><th>${t('Net amount')}</th><th>${t('Price')}</th><th>${t('Shares bought')}</th><th>${t('Shares after')}</th></tr></thead><tbody id="dl-body">
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Date')}</th><th>${t('Event')}</th><th>${H('Shares held')}</th><th>${H('Per share')}</th><th>${t('Net amount')}</th><th>${t('Price')}</th><th>${t('Shares bought')}</th><th>${t('Shares after')}</th></tr></thead><tbody id="dl-body">
     ${dripRows(rows.slice(0, 36), sim)}</tbody></table></div>
     ${rows.length > 36 ? `<button class="btn" id="dl-more" style="justify-self:start">${t('Show all {n}', { n: rows.length })}</button>` : ''}</section>
   <section class="sec"><h2 style="font-size:18px">${t('Manage this holding')}</h2>
     <div class="panel stack">
       <div class="form-grid">
-        <div class="field"><label for="pa-acct">${t('Account')}</label><select id="pa-acct">${E.ACCOUNTS.map(a => `<option value="${a}" ${a === p.account ? 'selected' : ''}>${esc(acct(a))}</option>`).join('')}</select></div>
-        <div class="field"><label for="pa-drip">${t('Dividends')}</label><select id="pa-drip">${Object.entries(DRIP()).map(([k, l]) => `<option value="${k}" ${k === p.drip ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label for="pa-acct">${H('Account')}</label><select id="pa-acct">${E.ACCOUNTS.map(a => `<option value="${a}" ${a === p.account ? 'selected' : ''}>${esc(acct(a))}</option>`).join('')}</select></div>
+        <div class="field"><label for="pa-drip">${H('Dividends')}</label><select id="pa-drip">${Object.entries(DRIP()).map(([k, l]) => `<option value="${k}" ${k === p.drip ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="field wide"><span class="lbl">${t('Wealthsimple reinvests fractional shares. Many brokers only buy whole shares and leave the rest as cash.')}</span></div>
       </div>
       <div><span class="label">${t('Purchases and sales')}</span>
-        <div class="tbl-wrap" style="margin-top:6px"><table class="tbl"><thead><tr><th>${t('Date')}</th><th>${t('Shares')}</th><th>${t('Amount')}</th><th></th></tr></thead><tbody>
-        ${p.lots.slice().sort((a, b) => a.date.localeCompare(b.date)).map(l => `<tr><td>${esc(dfmt(l.date))}</td><td>${l.shares < 0 ? t('Sold {n}', { n: shares(-l.shares) }) : shares(l.shares)}</td><td>${l.cost ? nat(+l.cost, sim.cur) : `<span class="muted">${t('at close')}</span>`}</td><td><button class="btn sm ghost danger" data-act="del-lot" data-id="${esc(l.id)}">${t('Remove')}</button></td></tr>`).join('')}
+        <div class="tbl-wrap" style="margin-top:6px"><table class="tbl"><thead><tr><th>${t('Date')}</th><th>${H('Shares')}</th><th>${t('Amount')}</th><th></th></tr></thead><tbody>
+        ${p.lots.slice().sort((a, b) => a.date.localeCompare(b.date)).map(l => `<tr><td>${esc(dfmt(l.date))}</td><td>${l.shares < 0 ? t('Sold {n}', { n: shares(-l.shares) }) : shares(l.shares)}</td><td>${l.cost ? nat(E.lotAmount(l, sim.q), sim.cur) + (E.lotReadAsEach(l, sim.q) ? `<small>${t('{p} read as the price per share', { p: nat(+l.cost, sim.cur) })}</small>` : `<small>${t('{p} a share', { p: nat(E.lotAmount(l, sim.q) / Math.abs(+l.shares), sim.cur) })}</small>`) : `<span class="muted">${t('at close')}</span>`}</td><td><button class="btn sm ghost danger" data-act="del-lot" data-id="${esc(l.id)}">${t('Remove')}</button></td></tr>`).join('')}
         </tbody></table></div></div>
       <form id="lot-form" class="form-grid" novalidate>
         <div class="field"><label for="lt-side">${t('Add a')}</label><select id="lt-side"><option value="buy">${t('Purchase')}</option><option value="sell">${t('Sale')}</option></select></div>
         <div class="field"><label for="lt-date">${t('Date')}</label><input id="lt-date" type="date" value="${E.today()}" max="${E.today()}"></div>
-        <div class="field"><label for="lt-sh">${t('Shares')}</label><input id="lt-sh" type="number" step="any" min="0" inputmode="decimal"></div>
-        <div class="field"><label for="lt-cost">${t('Amount ({c}, optional)', { c: esc(sim.cur) })}</label><input id="lt-cost" type="number" step="any" min="0" inputmode="decimal" placeholder="${esc(t('Close price × shares'))}"></div>
+        <div class="field"><label for="lt-sh">${H('Shares')}</label><input id="lt-sh" type="number" step="any" min="0" inputmode="decimal"></div>
+        <div class="field wide"><label for="lt-cost">${H('Price paid')}</label>${costInput('lt', sim.cur)}</div>
         ${p.account === 'TFSA' ? `<div class="field wide"><label class="check-inline"><input type="checkbox" id="lt-new" checked> ${t('New money deposited into the TFSA (uses contribution room)')}</label></div>` : ''}
         <p class="err" id="lt-err" hidden style="grid-column:1/-1"></p>
         <div class="tools" style="grid-column:1/-1"><button class="btn primary" type="submit">${t('Add')}</button></div>
@@ -1167,13 +1182,14 @@ function wirePositionAdmin(sim) {
   $('#dl-more')?.addEventListener('click', e => { $('#dl-body').innerHTML = dripRows(all, sim); e.target.remove(); });
   $('#pa-acct').addEventListener('change', e => { p.account = e.target.value; changed(); toast(t('Account updated')); });
   $('#pa-drip').addEventListener('change', e => { p.drip = e.target.value; changed(); toast(t('Dividend setting updated. History replayed.')); });
+  wireCost('lt');
   $('#lot-form').addEventListener('submit', ev => {
     ev.preventDefault();
-    const sh = parseFloat($('#lt-sh').value), date = $('#lt-date').value, cost = parseFloat($('#lt-cost').value), side = $('#lt-side').value;
+    const sh = parseFloat($('#lt-sh').value), date = $('#lt-date').value, cost = costTotal('lt'), side = $('#lt-side').value;
     const err = $('#lt-err');
     if (!(sh > 0) || !date) { err.textContent = t('Enter a date and a number of shares.'); err.hidden = false; return; }
     if (side === 'sell' && sh > sim.shares + 1e-9) { err.textContent = t('You hold {n} shares.', { n: shares(sim.shares) }); err.hidden = false; return; }
-    p.lots.push({ id: rid('l'), date, shares: side === 'sell' ? -sh : sh, cost: cost > 0 ? cost : null, addedAt: Date.now(), ...($('#lt-new') && !$('#lt-new').checked && side !== 'sell' ? { newMoney: false } : {}) });
+    p.lots.push({ id: rid('l'), date, shares: side === 'sell' ? -sh : sh, cost: cost > 0 ? cost : null, ...(cost > 0 ? { costMode: 'total' } : {}), addedAt: Date.now(), ...($('#lt-new') && !$('#lt-new').checked && side !== 'sell' ? { newMoney: false } : {}) });
     changed(); toast(side === 'sell' ? t('Sale added') : t('Purchase added'));
   });
 }
@@ -1188,13 +1204,13 @@ function viewAdd() {
   <div class="page-head"><div><h1>${t('Add holdings')}</h1><p>${t('Ticker, shares and the date you bought. Every dividend and DRIP purchase since then is filled in for you.')}</p></div></div>
   <div class="tabs" role="tablist"><button role="tab" aria-selected="true" data-pane="one">${t('One holding')}</button><button role="tab" aria-selected="false" data-pane="paste">${t('Paste a list')}</button><button role="tab" aria-selected="false" data-pane="file">${t('Import a file')}</button></div>
   <div class="panel" data-p="one"><form id="one-form" class="form-grid" novalidate>
-    <div class="field wide ac"><label for="o-sym">${t('Ticker')}</label><input id="o-sym" autocomplete="off" autocapitalize="characters" placeholder="VDY, XEI, SCHD…" value="${esc(pre ? pre.d : prefill)}"><div class="ac-list" id="o-ac" hidden></div><span class="hint" id="o-pick">${pre ? esc(pre.n) : t('Start typing and pick from the list.')}</span></div>
-    <div class="field"><label for="o-sh">${t('Shares')}</label><input id="o-sh" type="number" step="any" min="0" inputmode="decimal"></div>
-    <div class="field"><label for="o-date">${t('Date bought')}</label><input id="o-date" type="date" max="${E.today()}" value="${E.addDays(E.today(), -365)}"></div>
-    <div class="field"><label for="o-acct">${t('Account')}</label>${ACCT('o-acct', st.account)}</div>
-    <div class="field"><label for="o-drip">${t('Dividends')}</label><select id="o-drip">${Object.entries(DRIP()).map(([k, l]) => `<option value="${k}" ${k === st.drip ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="field wide ac"><label for="o-sym">${H('Ticker')}</label><input id="o-sym" autocomplete="off" autocapitalize="characters" placeholder="VDY, XEI, SCHD…" value="${esc(pre ? pre.d : prefill)}"><div class="ac-list" id="o-ac" hidden></div><span class="hint" id="o-pick">${pre ? esc(pre.n) : t('Start typing and pick from the list.')}</span></div>
+    <div class="field"><label for="o-sh">${H('Shares')}</label><input id="o-sh" type="number" step="any" min="0" inputmode="decimal"></div>
+    <div class="field"><label for="o-date">${H('Date bought')}</label><input id="o-date" type="date" max="${E.today()}" value="${E.addDays(E.today(), -365)}"></div>
+    <div class="field"><label for="o-acct">${H('Account')}</label>${ACCT('o-acct', st.account)}</div>
+    <div class="field"><label for="o-drip">${H('Dividends')}</label><select id="o-drip">${Object.entries(DRIP()).map(([k, l]) => `<option value="${k}" ${k === st.drip ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="field wide tfsa-new" id="o-tfsa" hidden><label class="check-inline"><input type="checkbox" id="o-new" checked> ${t('New money deposited into the TFSA (uses contribution room)')}</label><span class="hint" id="o-room"></span></div>
-    <div class="field wide"><label for="o-cost">${t('Amount paid (optional)')}</label><input id="o-cost" type="number" step="any" min="0" inputmode="decimal" placeholder="${esc(t('Leave blank to use that day’s closing price'))}"></div>
+    <div class="field wide"><label for="o-cost">${H('Price paid')}</label>${costInput('o')}</div>
     <p class="err" id="o-err" hidden style="grid-column:1/-1"></p>
     <div class="tools" style="grid-column:1/-1"><button class="btn primary" type="submit">${t('Add holding')}</button><span class="muted" style="font-size:13px">${t('Bought more than once? Add the first purchase here, then add the others from the holding’s page.')}</span></div>
   </form></div>
@@ -1205,8 +1221,13 @@ function viewAdd() {
     <div class="tools"><button class="btn" id="p-prev">${t('Check the list')}</button></div><div id="p-out"></div>
   </div>
   <div class="panel stack" data-p="file" hidden>
-    <p style="margin:0">${t('Upload a CSV of your holdings or account activity. Columns for symbol and quantity are found automatically; dates, amounts, account and buy/sell type are used when present. Dividend and DRIP rows are skipped because Yield Ledger replays them itself.')}</p>
-    <div class="field"><label for="f-file">${t('CSV file')}</label><input id="f-file" type="file" accept=".csv,text/csv,.txt"></div>
+    <p style="margin:0">${t('Upload the export from your broker: a CSV or Excel file of your holdings or account activity, or a PDF statement. Wealthsimple, Questrade, Interactive Brokers, TD, RBC and most others work. Columns for symbol and quantity are found automatically; dates, amounts, account and buy/sell type are used when present. Dividend and DRIP rows are skipped because Yield Ledger replays them itself.')}</p>
+    <details class="howto"><summary>${t('Where to find the export')}</summary><ul class="steps">
+      <li><b>Wealthsimple</b>: ${t('Account → Activity or Holdings → the download (⤓) button, CSV. On the web app it is under Documents → Statements too.')}</li>
+      <li><b>Questrade</b>: ${t('Reports → Account activity → choose the dates → Export to Excel.')}</li>
+      <li><b>Interactive Brokers</b>: ${t('Performance & Reports → Statements → Activity → Format: CSV. Or Flex Queries for trades.')}</li>
+      <li>${t('Any broker: the monthly PDF statement works as a last resort. Check the amounts after importing.')}</li></ul></details>
+    <div class="field"><label for="f-file">${t('File (CSV, Excel or PDF)')}</label><input id="f-file" type="file" accept=".csv,text/csv,.txt,.xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></div>
     <div class="form-grid"><div class="field"><label for="f-date">${t('Date when a row has none')}</label><input id="f-date" type="date" max="${E.today()}" value="${E.addDays(E.today(), -365)}"></div><div class="field"><label for="f-acct">${t('Account when a row has none')}</label>${ACCT('f-acct', st.account)}</div></div>
     <div id="f-out"></div>
   </div>
@@ -1217,8 +1238,8 @@ function viewAdd() {
     const box = $('#o-tfsa'), isT = $('#o-acct').value === 'TFSA';
     box.hidden = !isT; if (!isT) return;
     const r = tfsa(), el = $('#o-room');
-    if (!r) { el.innerHTML = `<a href="#/settings">${t('Set your TFSA room in Settings')}</a> ${t('to see how much is left.')}`; return; }
-    const sh = parseFloat($('#o-sh').value), cost = parseFloat($('#o-cost').value), date = $('#o-date').value;
+    if (!r) { el.innerHTML = `<a href="#/settings#tfsa">${t('Enter your birth year in Settings')}</a> ${t('to see how much is left.')}`; return; }
+    const sh = parseFloat($('#o-sh').value), cost = costTotal('o'), date = $('#o-date').value;
     const q = picked && (S.quotes[picked.s] || pq[picked.s]);
     if (picked && !q && !(cost > 0) && !pq[picked.s]) { pq[picked.s] = null; D.loadQuote(picked.s).then(x => { if (x) { pq[picked.s] = x; roomPreview(); } }); }
     const px = q && date ? E.priceOn(q.c, date) : picked?.px;
@@ -1229,6 +1250,7 @@ function viewAdd() {
       : t('Room left: {a}. Reinvested dividends and cash already in the TFSA do not use room.', { a: money0(r.left) });
   };
   ['#o-acct', '#o-sh', '#o-cost', '#o-date', '#o-new', '#o-sym'].forEach(s => { $(s).addEventListener('input', roomPreview); $(s).addEventListener('change', roomPreview); });
+  wireCost('o', roomPreview);
   setTimeout(roomPreview, 0);
   $$('[data-pane]').forEach(b => b.addEventListener('click', () => {
     $$('[data-pane]').forEach(x => x.setAttribute('aria-selected', String(x === b)));
@@ -1256,41 +1278,268 @@ function viewAdd() {
     ev.preventDefault();
     const err = $('#o-err'); err.hidden = true;
     if (!picked) picked = D.resolveSymbol(inp.value, S.rows);
-    const sh = parseFloat($('#o-sh').value), date = $('#o-date').value, cost = parseFloat($('#o-cost').value);
+    const sh = parseFloat($('#o-sh').value), date = $('#o-date').value, cost = costTotal('o');
     if (!picked) { err.textContent = t('{s} isn’t in the tracked list. Pick one from the suggestions.', { s: inp.value || t('That ticker') }); err.hidden = false; return; }
     if (!(sh > 0) || !date) { err.textContent = t('Enter the number of shares and the date you bought.'); err.hidden = false; return; }
-    const id = addRows([{ sym: picked, shares: sh, date, cost: cost > 0 ? cost : null, account: $('#o-acct').value, newMoney: $('#o-acct').value === 'TFSA' ? $('#o-new').checked : undefined }], $('#o-drip').value);
+    const id = addRows([{ sym: picked, shares: sh, date, cost: cost > 0 ? cost : null, costMode: 'total', account: $('#o-acct').value, newMoney: $('#o-acct').value === 'TFSA' ? $('#o-new').checked : undefined }], $('#o-drip').value);
     toast(t('{s} added. Dividends since {d} replayed.', { s: picked.d, d: dfmt(date) }));
     changed('#/h/' + encodeURIComponent(id));
   });
   $('#p-prev').addEventListener('click', () => preview(parseQuick($('#p-text').value, S.rows, { date: $('#p-date').value, account: $('#p-acct').value }), $('#p-out')));
   $('#f-file').addEventListener('change', async e => {
     const file = e.target.files[0]; if (!file) return;
+    const out = $('#f-out'); out.innerHTML = `<p class="muted">${t('Reading {f}…', { f: esc(file.name) })}</p>`;
+    const opts = { date: $('#f-date').value, account: $('#f-acct').value };
     try {
-      const r = parseExport(await file.text(), S.rows, { date: $('#f-date').value, account: $('#f-acct').value });
-      preview(r.rows, $('#f-out'), t('Read columns: {c}.', { c: Object.entries(r.columns).map(([k, v]) => `${k} = “${v}”`).join(', ') }) + (r.skipped ? ' ' + t('Skipped {n} dividend, transfer or other rows.', { n: r.skipped }) : ''));
-    } catch (er) { $('#f-out').innerHTML = `<p class="err">${esc(t(er.message))}</p>`; }
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const r = ext === 'pdf' ? await parsePdf(new Uint8Array(await file.arrayBuffer()), S.rows, opts)
+        : ext === 'xlsx' || ext === 'xls' ? await parseExcel(new Uint8Array(await file.arrayBuffer()), S.rows, opts)
+        : parseExport(await file.text(), S.rows, opts);
+      const cols = Object.entries(r.columns).map(([k, v]) => `${k} = “${v}”`).join(', ');
+      const note = [cols ? t('Read columns: {c}.', { c: cols }) : '', r.skipped ? t('Skipped {n} dividend, transfer or other rows.', { n: r.skipped }) : '', r.pdf ? t('PDF statements do not always show what you paid; check the amounts after importing.') : ''].filter(Boolean).join(' ');
+      if (r.kind === 'holdings') await syncPreview(r.rows, out, note);
+      else preview(r.rows, out, note);
+    } catch (er) { out.innerHTML = `<p class="err">${esc(t(er.message))}</p>`; }
   });
 }
 function preview(rows, out, note = '') {
   const good = rows.filter(r => r.sym && r.shares);
   const bad = rows.length - good.length;
   out.innerHTML = `${note ? `<p class="muted" style="font-size:13px;margin:0 0 8px">${esc(note)}</p>` : ''}
-  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Line')}</th><th>${t('Security')}</th><th>${t('Shares')}</th><th>${t('Date')}</th><th>${t('Amount')}</th><th>${t('Account')}</th></tr></thead><tbody>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Line')}</th><th>${t('Security')}</th><th>${H('Shares')}</th><th>${t('Date')}</th><th>${t('Amount')}</th><th>${H('Account')}</th></tr></thead><tbody>
   ${rows.map(r => `<tr><td class="txt muted" style="font-size:12.5px">${esc(r.line.slice(0, 60))}</td><td class="txt">${r.sym ? `<b class="mono">${esc(r.sym.d)}</b> <span class="muted" style="font-size:12px">${r.sym.ex}</span>` : `<span class="neg">${t('{s} not tracked', { s: esc(r.symText || '?') })}</span>`}</td><td>${r.shares ? shares(r.shares) : `<span class="neg">${t('missing')}</span>`}</td><td>${esc(r.date ? dfmt(r.date) : '')}</td><td>${r.cost ? money(r.cost) : `<span class="muted">${t('at close')}</span>`}</td><td class="txt">${esc(acct(r.account))}</td></tr>`).join('')}
   </tbody></table></div>
   <div class="tools" style="margin-top:10px"><button class="btn primary" id="add-all" ${good.length ? '' : 'disabled'}>${tp(good.length, 'Add {n} holding', 'Add {n} holdings')}</button>${bad ? `<span class="muted" style="font-size:13px">${tp(bad, '{n} line will be skipped.', '{n} lines will be skipped.')}</span>` : ''}</div>`;
   $('#add-all', out)?.addEventListener('click', () => { addRows(good, S.pf.settings.drip); toast(t('{n} added. Dividend history replayed.', { n: good.length })); changed('#/'); });
+}
+/** Price box with a per-share / total switch. Returns the total for the purchase, or null to use the close. */
+function costInput(id, cur = '') {
+  const m = store.get('yl.costmode') || 'each';
+  return `<div class="cost-row"><input id="${id}-cost" type="number" step="any" min="0" inputmode="decimal" placeholder="${esc(t('Optional: blank uses that day’s close'))}">
+    <div class="seg" role="group" aria-label="${esc(t('Price per share or total'))}"><button type="button" data-cm="each" data-for="${id}" aria-pressed="${m === 'each'}">${t('per share')}${cur ? ' (' + esc(cur) + ')' : ''}</button><button type="button" data-cm="total" data-for="${id}" aria-pressed="${m === 'total'}">${t('total paid')}</button></div></div>
+    <span class="hint" id="${id}-chint"></span>`;
+}
+const costMode = id => $(`[data-for="${id}"][aria-pressed="true"]`)?.dataset.cm || 'each';
+function costTotal(id) {
+  const v = parseFloat($(`#${id}-cost`).value), sh = parseFloat($(`#${id}-sh`).value);
+  if (!(v > 0)) return null;
+  return costMode(id) === 'each' ? (sh > 0 ? v * sh : null) : v;
+}
+function wireCost(id, onChange = () => {}) {
+  const hint = () => {
+    const v = parseFloat($(`#${id}-cost`).value), sh = parseFloat($(`#${id}-sh`).value), tot = costTotal(id);
+    $(`#${id}-chint`).textContent = v > 0 && sh > 0 ? (costMode(id) === 'each'
+      ? t('{n} × {p} = {t} out of your pocket.', { n: shares(sh), p: num(v, 2), t: num(tot, 2) })
+      : t('{t} in total, or {p} a share.', { t: num(tot, 2), p: num(v / sh, 2) })) : t('Enter the price of one share, or switch to the total you paid including commission.');
+  };
+  $$(`[data-for="${id}"]`).forEach(b => b.addEventListener('click', () => {
+    $$(`[data-for="${id}"]`).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    store.set('yl.costmode', b.dataset.cm); hint(); onChange();
+  }));
+  [`#${id}-cost`, `#${id}-sh`].forEach(s => $(s).addEventListener('input', hint));
+  hint();
+}
+/**
+ * A holdings snapshot from a broker: bring each holding's share count in line with the file.
+ * A new holding is dated on the "date when a row has none". With DRIP on, dividends since then add shares,
+ * so the starting count is scaled down so that the replay ends on the share count in the file.
+ */
+async function syncPlan(rows) {
+  const today = E.today();
+  const plan = [];
+  for (const r of rows.filter(r => r.sym && r.shares > 0)) {
+    const p = S.pf.positions.find(x => x.sym === r.sym.s && x.account === r.account);
+    const sim = p && S.sims.find(x => x.pos.id === p.id);
+    if (!p || !sim) {
+      const drip = S.pf.settings.drip || 'frac';
+      let start = r.shares;
+      const q = drip !== 'off' && r.date < today ? (S.quotes[r.sym.s] || await D.loadQuote(r.sym.s)) : null;
+      if (q) {
+        const one = E.simulate({ sym: r.sym.s, account: r.account, drip: 'frac', lots: [{ id: 'x', date: r.date, shares: 1 }] }, q, S.fx);
+        if (one.shares > 1) start = r.shares / one.shares;
+        if (drip === 'whole') start = Math.round(start);
+      }
+      plan.push({ r: { ...r, shares: start }, act: 'new', now: r.shares, start });
+      continue;
+    }
+    const diff = r.shares - sim.shares;
+    if (Math.abs(diff) < 0.001 * Math.max(1, r.shares)) { plan.push({ r, p, act: 'same', diff: 0 }); continue; }
+    let cost = null;
+    if (diff > 0 && r.cost > 0) { const extra = r.cost - sim.invested; if (extra > 0 && extra < r.cost) cost = extra; }
+    plan.push({ r, p, act: diff > 0 ? 'buy' : 'sell', diff, cost, date: today });
+  }
+  return plan;
+}
+async function syncPreview(rows, out, note = '') {
+  const plan = await syncPlan(rows), bad = rows.filter(r => !r.sym || !(r.shares > 0));
+  const what = x => x.act === 'new' ? `<span class="chip good">${t('New holding')}</span> ${Math.abs(x.start - x.now) > 0.001 ? t('{a} bought {d}, grown to {b} by DRIP', { a: shares(x.start), b: shares(x.now), d: dfmt(x.r.date) }) : ''}` : x.act === 'same' ? `<span class="muted">${t('Already matches')}</span>`
+    : x.act === 'buy' ? t('+{n} shares, added as a purchase today', { n: shares(x.diff) }) : t('−{n} shares, recorded as a sale today', { n: shares(-x.diff) });
+  out.innerHTML = `${note ? `<p class="muted" style="font-size:13px;margin:0 0 8px">${esc(note)}</p>` : ''}
+  <div class="seg" role="radiogroup" style="margin-bottom:10px"><button type="button" data-imode="sync" aria-pressed="true">${t('Update my portfolio to match')}</button><button type="button" data-imode="add" aria-pressed="false">${t('Add everything as new purchases')}</button></div>
+  <p class="muted" style="font-size:13px;margin:0 0 8px">${t('This looks like a list of holdings. Updating compares each share count with what Yield Ledger already has (including DRIP shares) and only adds the difference. Holdings that are not in the file are left alone.')}</p>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Security')}</th><th>${t('Account')}</th><th>${t('Shares in file')}</th><th>${t('What happens')}</th></tr></thead><tbody>
+  ${plan.map(x => `<tr><td class="txt"><b class="mono">${esc(x.r.sym.d)}</b></td><td class="txt">${esc(acct(x.r.account))}</td><td>${shares(x.now ?? x.r.shares)}</td><td class="txt">${what(x)}</td></tr>`).join('')}
+  ${bad.map(r => `<tr><td class="txt"><span class="neg">${t('{s} not tracked', { s: esc(r.symText || '?') })}</span></td><td></td><td>${shares(r.shares)}</td><td class="txt muted">${t('Skipped')}</td></tr>`).join('')}
+  </tbody></table></div>
+  <div class="tools" style="margin-top:10px"><button class="btn primary" id="sync-go">${t('Update portfolio')}</button></div><div id="sync-add" hidden></div>`;
+  $$('[data-imode]', out).forEach(b => b.addEventListener('click', () => {
+    $$('[data-imode]', out).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    const add = b.dataset.imode === 'add';
+    $('#sync-go', out).parentElement.hidden = add; $('.tbl-wrap', out).hidden = add;
+    const box = $('#sync-add', out); box.hidden = !add; if (add) preview(rows, box);
+  }));
+  $('#sync-go', out).addEventListener('click', () => {
+    let n = 0;
+    for (const x of plan) {
+      if (x.act === 'same') continue;
+      if (x.act === 'new') { addRows([x.r], S.pf.settings.drip); n++; continue; }
+      x.p.lots.push({ id: rid('l'), date: x.date, shares: x.diff, cost: x.cost, ...(x.cost ? { costMode: 'total' } : {}), addedAt: Date.now() });
+      n++;
+    }
+    toast(n ? tp(n, '{n} holding updated.', '{n} holdings updated.') : t('Everything already matches.'));
+    changed('#/');
+  });
 }
 function addRows(rows, drip) {
   let last = null;
   for (const r of rows) {
     let p = S.pf.positions.find(x => x.sym === r.sym.s && x.account === r.account);
     if (!p) { p = { id: rid('p'), sym: r.sym.s, account: r.account, drip: drip || 'frac', lots: [] }; S.pf.positions.push(p); }
-    p.lots.push({ id: rid('l'), date: r.date, shares: r.shares, cost: r.cost || null, addedAt: Date.now(), ...(r.newMoney === false ? { newMoney: false } : {}) });
+    p.lots.push({ id: rid('l'), date: r.date, shares: r.shares, cost: r.cost || null, ...(r.cost && r.costMode ? { costMode: r.costMode } : {}), addedAt: Date.now(), ...(r.newMoney === false ? { newMoney: false } : {}) });
     last = p.id;
   }
   return last;
+}
+
+
+/* ------------------------------------------------------------ technical analysis */
+function taPanel(q) {
+  const x = E.technicals(q);
+  if (!x) return '';
+  const P = v => nat(v, q.cur);
+  const sig = (cond, up, dn, mid) => cond === null ? `<span class="sig mid">${mid}</span>` : cond ? `<span class="sig up">${up}</span>` : `<span class="sig dn">${dn}</span>`;
+  const trendTxt = { up: t('Uptrend'), 'up-weak': t('Above the long-term average'), down: t('Downtrend'), 'down-weak': t('Below the long-term average') }[x.trend];
+  const leanTxt = { bull: t('Leaning positive'), bear: t('Leaning negative'), neutral: t('Mixed signals') }[x.lean];
+  const rsiTxt = x.rsi > 70 ? t('Overbought: the price rose fast and may pause') : x.rsi < 30 ? t('Oversold: the price fell fast and may bounce') : x.rsi >= 50 ? t('Neutral, with buyers slightly in control') : t('Neutral, with sellers slightly in control');
+  const rows = [
+    [H('Trend'), sig(x.trend.startsWith('up') ? true : false, trendTxt, trendTxt), Number.isFinite(x.sma200) ? t('Price {p} vs 50-day {a} and 200-day {b}', { p: P(x.px), a: P(x.sma50), b: P(x.sma200) }) : t('Price {p} vs 50-day {a}', { p: P(x.px), a: P(x.sma50) })],
+    [H('SMA 50'), sig(x.px > x.sma50, t('Price above'), t('Price below')), `${P(x.sma50)} · ${x.sma50 > x.sma50Prev ? t('rising') : t('falling')}`],
+    ...(Number.isFinite(x.sma200) ? [[H('SMA 200'), sig(x.px > x.sma200, t('Price above'), t('Price below')), `${P(x.sma200)} · ${x.sma200 > x.sma200Prev ? t('rising') : t('falling')}${x.maCross ? ' · ' + (x.maCross.dir === 'golden' ? t('golden cross on {d}', { d: dfmt(x.maCross.date) }) : t('death cross on {d}', { d: dfmt(x.maCross.date) })) : ''}`]] : []),
+    [H('RSI (14)'), sig(x.rsi > 70 ? false : x.rsi < 30 ? true : null, t('Oversold'), t('Overbought'), num(x.rsi, 0)), `${num(x.rsi, 0)} · ${rsiTxt}`],
+    [H('MACD'), sig(x.hist > 0, t('Bullish'), t('Bearish')), `${num(x.macd, 3)} vs ${t('signal')} ${num(x.signal, 3)}${x.macdCross ? ' · ' + (x.macdCross.dir === 'up' ? t('crossed up on {d}', { d: dfmt(x.macdCross.date) }) : t('crossed down on {d}', { d: dfmt(x.macdCross.date) })) : ''}`],
+    [H('52-week range'), `<span class="range52"><span style="left:${(x.pos52 * 100).toFixed(1)}%"></span></span>`, t('{lo} – {hi} · today is {p} of the way up', { lo: P(x.lo52), hi: P(x.hi52), p: pct(x.pos52, 0) })],
+    [H('Support'), x.support ? `<b class="mono">${P(x.support)}</b>` : '—', x.support ? t('{p} below today', { p: pct(1 - x.support / x.px, 1) }) : t('At or near the 1-year low')],
+    [H('Resistance'), x.resistance ? `<b class="mono">${P(x.resistance)}</b>` : '—', x.resistance ? t('{p} above today', { p: pct(x.resistance / x.px - 1, 1) }) : t('At or near the 6-month high')],
+  ];
+  return `<section class="sec"><div class="sec-head"><h2>${H('Technical analysis')}</h2><span class="pill-${x.lean === 'bull' ? 'good' : x.lean === 'bear' ? 'bad' : 'mid'}">${leanTxt}</span><span class="muted" style="font-size:13px">${t('From daily closes to {d}', { d: dfmt(x.asof) })}</span></div>
+    <div class="panel stack">
+      <div class="legend"><span><i class="sw c1"></i>${t('Price')}</span><span><i class="sw c2"></i>${t('50-day average')}</span><span><i class="sw c3"></i>${t('200-day average')}</span></div>
+      <div id="ch-ta"></div>
+      <div class="ta-moves">${[[t('1 month'), x.chg1m], [t('3 months'), x.chg3m], [t('6 months'), x.chg6m]].map(([l, v]) => `<div><span class="label">${l}</span><b class="${cls(v)}">${sgnPct(v, 1)}</b></div>`).join('')}</div>
+      <div class="tbl-wrap" style="border:0"><table class="tbl left ta-tbl"><tbody>${rows.map(([a, b, c]) => `<tr><th scope="row">${a}</th><td>${b}</td><td class="muted">${c}</td></tr>`).join('')}</tbody></table></div>
+      <p class="muted" style="margin:0;font-size:12.5px">${t('Technical signals describe recent price behaviour only. They are not a forecast or a recommendation, and they say nothing about the dividend.')}</p>
+    </div></section>`;
+}
+function drawTA(q) {
+  const el = $('#ch-ta'); if (!el) return;
+  const x = E.technicals(q); if (!x) return;
+  const se = x.series;
+  lineChart(el, { x: se.d, zero: false, fmtX: d => `${MON()[+d.slice(5, 7) - 1]} ’${d.slice(2, 4)}`, fmtY: v => nat(v, q.cur).replace(/[.,]00(?=\s|$)/, ''), label: t('Price with 50 and 200-day averages'),
+    series: [{ name: t('Price'), v: se.px, cls: 'c1' }, { name: t('50-day average'), v: se.sma50, cls: 'c2' }, { name: t('200-day average'), v: se.sma200, cls: 'c3' }],
+    tip: i => `<b>${dfmt(se.d[i])}</b><div class="r"><span>${t('Price')}</span><span>${nat(se.px[i], q.cur)}</span></div>${Number.isFinite(se.sma50[i]) ? `<div class="r"><span>${t('50-day')}</span><span>${nat(se.sma50[i], q.cur)}</span></div>` : ''}${Number.isFinite(se.sma200[i]) ? `<div class="r"><span>${t('200-day')}</span><span>${nat(se.sma200[i], q.cur)}</span></div>` : ''}${Number.isFinite(se.rsi[i]) ? `<div class="r"><span>RSI</span><span>${num(se.rsi[i], 0)}</span></div>` : ''}` });
+}
+
+/* ------------------------------------------------------------ watchlists */
+const watchLists = () => (S.pf.watch = S.pf.watch || []);
+const followed = () => [...new Set([...S.pf.positions.map(p => p.sym), ...watchLists().flatMap(w => w.syms)])];
+/** Payout changes since the person last looked, for holdings and watchlists. New symbols are recorded silently. */
+function payoutNews() {
+  const syms = followed();
+  const seen = S.pf.seen = S.pf.seen || {};
+  const fresh = syms.filter(s => !seen[s]);
+  if (fresh.length && S.rows.length) { Object.assign(seen, E.snapshotPayouts(fresh, S.rows)); if (!S.demo) persist(); }
+  return E.payoutChanges(syms, S.rows, seen);
+}
+function payoutAlerts(list = payoutNews()) {
+  if (!list.length) return '';
+  return `<section class="sec payout-news"><div class="sec-head"><h2>${H('Payout change')}</h2><span class="muted" style="font-size:13px">${t('Since you last checked')}</span><button class="btn sm" data-act="payout-seen">${t('Got it')}</button></div>
+    <div class="panel stack">${list.map(c => `<div class="alert ${c.chg > 0 ? 'good' : 'bad'}"><i></i><span><a class="tk" href="#/t/${encodeURIComponent(c.s)}">${esc(c.d)}</a> ${c.chg > 0
+      ? t('raised its payout {p}: {a} → {b} a share per year. Yield {y1} → {y2}.', { p: pct(c.chg, 1), a: nat(c.from, c.cur), b: nat(c.to, c.cur), y1: pct(c.yFrom), y2: pct(c.yTo) })
+      : t('cut its payout {p}: {a} → {b} a share per year. Yield {y1} → {y2}.', { p: pct(-c.chg, 1), a: nat(c.from, c.cur), b: nat(c.to, c.cur), y1: pct(c.yFrom), y2: pct(c.yTo) })} <span class="muted">${t('since {d}', { d: dfmt(c.since) })}</span></span></div>`).join('')}</div></section>`;
+}
+function watchButton(sym) {
+  const inLists = watchLists().filter(w => w.syms.includes(sym));
+  return `<button class="btn sm ${inLists.length ? '' : 'ghost'}" data-act="watch-pick" data-sym="${esc(sym)}" style="margin-top:8px">${inLists.length ? '★ ' + esc(inLists.map(w => w.name).join(', ')) : '☆ ' + t('Add to watchlist')}</button>`;
+}
+function openWatchPicker(sym) {
+  $('#wl-dlg')?.remove();
+  const r = S.rows.find(x => x.s === sym);
+  const d = document.createElement('dialog');
+  d.id = 'wl-dlg'; d.className = 'fb-dlg';
+  const draw = () => {
+    d.innerHTML = `<form method="dialog" novalidate id="wl-form">
+      <div class="fb-top"><h2>${t('Watch {s}', { s: esc(r?.d || sym) })}</h2><button class="x" type="button" data-wl="close" aria-label="${esc(t('Close this window'))}">×</button></div>
+      ${watchLists().length ? `<div class="stack" style="gap:6px">${watchLists().map(w => `<label class="check-inline wl-opt"><input type="checkbox" data-wl-id="${esc(w.id)}" ${w.syms.includes(sym) ? 'checked' : ''}> ${esc(w.name)} <span class="muted">(${w.syms.length})</span></label>`).join('')}</div>` : `<p class="muted" style="margin:0">${t('You have no watchlists yet. Name your first one below.')}</p>`}
+      <div class="bill-top" style="margin-top:12px"><input id="wl-new" maxlength="40" placeholder="${esc(t('New list name, e.g. Monthly payers'))}" aria-label="${esc(t('New list name'))}"><button class="btn sm" type="button" data-wl="create">${t('Create')}</button></div>
+      <div class="tools" style="margin-top:14px"><button class="btn primary" type="button" data-wl="close">${t('Done')}</button><a class="btn ghost" href="#/watch" data-wl="close">${t('Open watchlists')}</a></div></form>`;
+  };
+  draw();
+  document.body.appendChild(d); d.showModal();
+  d.addEventListener('change', e => {
+    const id = e.target.dataset.wlId; if (!id) return;
+    const w = watchLists().find(x => x.id === id);
+    w.syms = e.target.checked ? [...new Set([...w.syms, sym])] : w.syms.filter(s => s !== sym);
+    persist();
+  });
+  d.addEventListener('click', e => {
+    const a = e.target.closest('[data-wl]'); if (!a) return;
+    if (a.dataset.wl === 'create') {
+      const name = $('#wl-new', d).value.trim(); if (!name) { $('#wl-new', d).focus(); return; }
+      watchLists().push({ id: rid('w'), name, syms: [sym] }); persist(); draw(); return;
+    }
+    d.close(); d.remove(); route();
+  });
+  d.addEventListener('cancel', () => setTimeout(() => { d.remove(); route(); }, 0));
+}
+function viewWatch(id) {
+  const lists = watchLists();
+  const cur = lists.find(w => w.id === id) || lists[0];
+  const news = payoutNews();
+  const rowsOf = w => w.syms.map(s => S.rows.find(r => r.s === s) || { s, d: s.replace(/\.TO$/, ''), n: t('Waiting for market data') });
+  shell('watch', `
+  <div class="page-head"><div><h1>${H('Watchlists')}</h1><p class="lede">${t('Follow securities you do not own yet. You will see here and on your portfolio when one of them raises or cuts its payout.')}</p></div></div>
+  ${payoutAlerts(news)}
+  <div class="wl-tabs" role="tablist">${lists.map(w => `<a role="tab" href="#/watch/${encodeURIComponent(w.id)}" aria-selected="${w === cur}">${esc(w.name)} <span class="muted">${w.syms.length}</span></a>`).join('')}
+    <form id="wl-add-list" class="bill-top" novalidate><input id="wl-name" maxlength="40" placeholder="${esc(t('New list name'))}" aria-label="${esc(t('New list name'))}"><button class="btn sm" type="submit">＋ ${t('New list')}</button></form></div>
+  ${cur ? `<section class="sec"><div class="sec-head"><h2 id="wl-title">${esc(cur.name)}</h2>
+      <div class="tools" style="gap:6px"><button class="btn sm ghost" data-act="wl-rename" data-id="${esc(cur.id)}">${t('Rename')}</button><button class="btn sm ghost danger" data-act="wl-del" data-id="${esc(cur.id)}">${t('Delete list')}</button></div></div>
+    <div class="panel stack">
+      <div class="field ac" style="max-width:420px"><label for="wl-sym">${t('Add a security')}</label><input id="wl-sym" autocomplete="off" autocapitalize="characters" placeholder="VDY, XEI, SCHD…"><div class="ac-list" id="wl-ac" hidden></div></div>
+      ${cur.syms.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${t('Security')}</th><th>${t('Price')}</th><th>${H('Yield')}</th><th>${H('Price, 1 year')}</th><th>${H('1-year return')}</th><th>${H('5-year return')}</th><th>${H('Score')}</th><th></th></tr></thead><tbody>
+        ${rowsOf(cur).map(r => { const ch = news.find(c => c.s === r.s); return `<tr class="link" data-href="#/t/${encodeURIComponent(r.s)}"><td class="txt"><a class="tk" href="#/t/${encodeURIComponent(r.s)}">${esc(r.d)}</a><span class="nm">${esc(r.n)}</span>${ch ? `<span class="chip ${ch.chg > 0 ? 'good' : 'bad'}">${ch.chg > 0 ? t('Payout up {p}', { p: pct(ch.chg, 1) }) : t('Payout down {p}', { p: pct(-ch.chg, 1) })}</span>` : ''}</td>
+          <td>${nat(r.px, r.cur)}</td><td>${pct(r.y)}</td><td class="${cls(r.p1)}">${sgnPct(r.p1, 1)}</td><td class="${cls(r.tr1)}">${sgnPct(r.tr1, 1)}</td><td class="${cls(r.tr5)}">${sgnPct(r.tr5, 1)}</td><td>${scoreBadge(r.sc)}</td>
+          <td><button class="btn sm ghost danger" data-act="wl-rm" data-id="${esc(cur.id)}" data-sym="${esc(r.s)}" aria-label="${esc(t('Remove'))}">×</button></td></tr>`; }).join('')}
+      </tbody></table></div>` : `<p class="muted" style="margin:0">${t('This list is empty. Add a ticker above, or tap “Add to watchlist” on any security’s page.')}</p>`}
+    </div></section>` : `<div class="panel empty"><h3>${t('Make your first watchlist')}</h3><p>${t('Give it any name, like “Monthly payers” or “Buy on a dip”, then add tickers.')}</p></div>`}
+  ${dataFoot()}`);
+  $('#wl-add-list').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const name = $('#wl-name').value.trim(); if (!name) return;
+    const w = { id: rid('w'), name, syms: [] }; lists.push(w); persist(); location.hash = '#/watch/' + encodeURIComponent(w.id);
+  });
+  if (!cur) return;
+  const inp = $('#wl-sym'), ac = $('#wl-ac');
+  let list = [], hi = 0;
+  const show = () => { list = D.search(S.rows, inp.value); ac.hidden = !list.length; ac.innerHTML = list.map((r, i) => `<button type="button" data-s="${esc(r.s)}" class="${i === hi ? 'on' : ''}"><span class="mono">${esc(r.d)}</span><span class="nmx">${esc(r.n)}</span><span class="muted">${r.ex} · ${pct(r.y, 1)}</span></button>`).join(''); };
+  const add = s => { if (!cur.syms.includes(s)) { cur.syms.push(s); persist(); } viewWatch(cur.id); setTimeout(() => $('#wl-sym')?.focus(), 0); };
+  inp.addEventListener('input', () => { hi = 0; show(); });
+  inp.addEventListener('blur', () => setTimeout(() => (ac.hidden = true), 150));
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { hi = Math.min(list.length - 1, hi + 1); show(); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { hi = Math.max(0, hi - 1); show(); e.preventDefault(); }
+    if (e.key === 'Enter') { const r = list[hi] || D.resolveSymbol(inp.value, S.rows); if (r) add(r.s); e.preventDefault(); }
+  });
+  ac.addEventListener('mousedown', e => { const b = e.target.closest('[data-s]'); if (b) { e.preventDefault(); add(b.dataset.s); } });
 }
 
 /* ------------------------------------------------------------ settings */
@@ -1301,7 +1550,7 @@ function viewSettings() {
   <section class="sec"><h2 style="font-size:18px">${t('Defaults and goal')}</h2><div class="panel"><form id="set-form" class="form-grid" novalidate>
     <div class="field"><label for="s-acct">${t('Default account')}</label><select id="s-acct">${E.ACCOUNTS.map(a => `<option value="${a}" ${a === st.account ? 'selected' : ''}>${esc(acct(a))}</option>`).join('')}</select></div>
     <div class="field"><label for="s-drip">${t('Default dividends')}</label><select id="s-drip">${Object.entries(DRIP()).map(([k, l]) => `<option value="${k}" ${k === st.drip ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    <div class="field"><label for="s-goal">${t('Monthly income goal ($)')}</label><input id="s-goal" type="number" min="0" step="50" value="${esc(st.goal || '')}"></div>
+    <div class="field"><label for="s-goal">${H('Monthly income goal ($)')}</label><input id="s-goal" type="number" min="0" step="50" value="${esc(st.goal || '')}"></div>
     <div class="tools"><button class="btn primary" type="submit">${t('Save')}</button></div>
   </form></div></section>
   ${tfsaSettings()}
@@ -1347,6 +1596,12 @@ document.addEventListener('click', async e => {
   if (a.dataset.href && !e.target.closest('a,button')) { location.hash = a.dataset.href; return; }
   const act = a.dataset.act;
   if (act === 'demo') return startDemo();
+  if (act === 'watch-pick') return openWatchPicker(a.dataset.sym);
+  if (act === 'payout-seen') { S.pf.seen = E.snapshotPayouts(followed(), S.rows, S.pf.seen); persist(); toast(t('Marked as seen. You will be told about the next change.')); return route(); }
+  if (act === 'wl-rm') { const w = watchLists().find(x => x.id === a.dataset.id); if (w) { w.syms = w.syms.filter(s => s !== a.dataset.sym); persist(); } return route(); }
+  if (act === 'wl-del') { if (!a.dataset.sure) { a.dataset.sure = '1'; a.textContent = t('Tap again to delete'); return; } S.pf.watch = watchLists().filter(x => x.id !== a.dataset.id); persist(); location.hash = '#/watch'; return route(); }
+  if (act === 'wl-rename') { const w = watchLists().find(x => x.id === a.dataset.id); const h = $('#wl-title'); if (!w || !h) return; h.innerHTML = `<form id="wl-ren" class="bill-top"><input id="wl-ren-in" maxlength="40" value="${esc(w.name)}"><button class="btn sm primary">${t('Save')}</button></form>`; $('#wl-ren-in').focus(); $('#wl-ren').addEventListener('submit', ev => { ev.preventDefault(); const v = $('#wl-ren-in').value.trim(); if (v) { w.name = v; persist(); } route(); }); return; }
+  if (act === 'help-toggle') { store.set('yl.help', helpOn() ? '0' : '1'); toast(helpOn() ? t('Explanations shown. Tap any ? to learn what a field means.') : t('Explanations hidden. Turn them back on with the Help button.')); return route(); }
   if (act === 'exit-demo') { S.demo = false; S.pf = null; S.sims = []; location.hash = '#/login'; return route(); }
   if (act === 'sign-out') { await saving; await S.auth.signOut(); return; }
   if (act === 'del-lot') {
@@ -1386,15 +1641,34 @@ document.addEventListener('click', async e => {
 function tfsaSettings() {
   const c = S.pf.settings.tfsa || {}, r = tfsa();
   const ws = c.withdrawals || [];
-  return `<section class="sec"><h2 style="font-size:18px">${t('TFSA contribution room')}</h2><div class="panel stack">
-    <p style="margin:0">${t('Enter the room the CRA shows for you. Yield Ledger then subtracts new money you put into TFSA holdings, adds each new year’s limit on January 1, and adds back withdrawals the following January 1.')}</p>
-    ${r ? `<div class="alert ${r.left < 0 ? 'bad' : 'good'}"><i></i><span>${t('Room left today: {m}', { m: `<b>${money0(r.left)}</b>` })} · ${t('{a} more on January 1, {y}.', { a: money0(r.next.amount), y: r.next.year })}${r.used ? ' · ' + t('{m} used since {d}', { m: money0(r.used), d: esc(dfmt(c.asOf)) }) : ''}</span></div>` : ''}
-    <form id="tfsa-form" class="form-grid" novalidate>
-      <div class="field"><label for="tf-room">${t('Your TFSA room ($)')}</label><input id="tf-room" type="number" min="0" step="100" inputmode="decimal" value="${esc(c.room ?? '')}"></div>
-      <div class="field"><label for="tf-asof">${t('As of')}</label><input id="tf-asof" type="date" max="${E.today()}" value="${esc(c.asOf || E.today())}"><span class="hint">${t('CRA My Account and your notice of assessment show your room as of January 1.')}</span></div>
-      <div class="field"><label for="tf-future">${t('Limit for future years ($)')}</label><input id="tf-future" type="number" min="0" step="500" value="${esc(c.future ?? 7000)}"><span class="hint">${t('The 2026 limit is $7,000. The CRA usually announces next year’s limit in November.')}</span></div>
-      <div class="tools" style="grid-column:1/-1"><button class="btn primary" type="submit">${t('Save TFSA room')}</button>${c.room != null ? `<button class="btn ghost" type="button" data-act="tfsa-clear">${t('Stop tracking')}</button>` : ''}</div>
+  const mode = c.room != null && !c.birth ? 'cra' : 'birth';
+  const y = +E.today().slice(0, 4);
+  const breakdown = r && c.birth ? `<div class="tfsa-math">
+      <div><span>${t('Room since {y} (CRA limits)', { y: r.start })}</span><b>${money0(r.added)}</b></div>
+      <div><span>${t('New money into TFSA holdings here')}</span><b>−${money0(r.used)}</b></div>
+      ${r.other ? `<div><span>${t('Other TFSA contributions')}</span><b>−${money0(r.other)}</b></div>` : ''}
+      ${r.back ? `<div><span>${t('Withdrawals added back')}</span><b>+${money0(r.back)}</b></div>` : ''}
+      <div class="tot"><span>${t('Room left today')}</span><b class="${r.left < 0 ? 'neg' : ''}">${money0(r.left)}</b></div></div>` : '';
+  return `<section class="sec" id="tfsa"><h2 style="font-size:18px">${t('TFSA contribution room')}</h2><div class="panel stack">
+    <div class="seg" role="radiogroup" aria-label="${esc(t('How to work out your room'))}">
+      <button type="button" data-tfmode="birth" aria-pressed="${mode === 'birth'}">${t('From my birth year')}</button>
+      <button type="button" data-tfmode="cra" aria-pressed="${mode === 'cra'}">${t('I’ll enter the CRA number')}</button></div>
+    ${r ? `<div class="alert ${r.left < 0 ? 'bad' : 'good'}"><i></i><span>${t('Room left today: {m}', { m: `<b>${money0(r.left)}</b>` })} · ${t('{a} more on January 1, {y}.', { a: money0(r.next.amount), y: r.next.year })}${r.used && !c.birth ? ' · ' + t('{m} used since {d}', { m: money0(r.used), d: esc(dfmt(c.asOf)) }) : ''}</span></div>` : ''}
+    ${breakdown}
+    <form id="tfsa-bform" class="form-grid" novalidate ${mode === 'birth' ? '' : 'hidden'}>
+      <p style="margin:0;grid-column:1/-1">${t('Your room starts the year you turn 18 (or 2009, when TFSAs began), adds each year’s CRA limit, and goes down by every dollar of new money you put in. Purchases you add here are counted automatically.')}</p>
+      <div class="field"><label for="tf-birth">${H('Year you were born')}</label><input id="tf-birth" type="number" min="1900" max="${y - 18}" step="1" inputmode="numeric" value="${esc(c.birth ?? '')}"></div>
+      <div class="field"><label for="tf-res">${H('Year you became a Canadian resident (optional)')}</label><input id="tf-res" type="number" min="2009" max="${y}" step="1" inputmode="numeric" value="${esc(c.resident ?? '')}"><span class="hint">${t('Leave blank if you have lived in Canada since you turned 18.')}</span></div>
+      <div class="field"><label for="tf-other">${H('TFSA contributions not entered here ($)')}</label><input id="tf-other" type="number" min="0" step="100" inputmode="decimal" value="${esc(c.other ?? '')}"><span class="hint">${t('Money you put into a TFSA for cash, GICs or holdings you have not added. Dividends reinvested do not count.')}</span></div>
+      <div class="tools" style="grid-column:1/-1"><button class="btn primary" type="submit">${t('Work out my room')}</button>${c.birth || c.room != null ? `<button class="btn ghost" type="button" data-act="tfsa-clear">${t('Stop tracking')}</button>` : ''}</div>
     </form>
+    <form id="tfsa-form" class="form-grid" novalidate ${mode === 'cra' ? '' : 'hidden'}>
+      <p style="margin:0;grid-column:1/-1">${t('Enter the room the CRA shows for you. Yield Ledger then subtracts new money you put into TFSA holdings, adds each new year’s limit on January 1, and adds back withdrawals the following January 1.')}</p>
+      <div class="field"><label for="tf-room">${H('Your TFSA room ($)')}</label><input id="tf-room" type="number" min="0" step="100" inputmode="decimal" value="${esc(c.room ?? '')}"></div>
+      <div class="field"><label for="tf-asof">${t('As of')}</label><input id="tf-asof" type="date" max="${E.today()}" value="${esc(c.asOf || E.today())}"><span class="hint">${t('CRA My Account and your notice of assessment show your room as of January 1.')}</span></div>
+      <div class="tools" style="grid-column:1/-1"><button class="btn primary" type="submit">${t('Save TFSA room')}</button>${c.birth || c.room != null ? `<button class="btn ghost" type="button" data-act="tfsa-clear">${t('Stop tracking')}</button>` : ''}</div>
+    </form>
+    <div class="field" style="max-width:320px"><label for="tf-future">${H('Limit for future years ($)')}</label><input id="tf-future" type="number" min="0" step="500" value="${esc(c.future ?? 7000)}"><span class="hint">${t('The 2026 limit is $7,000. The CRA usually announces next year’s limit in November.')}</span></div>
     <div><span class="label">${t('Withdrawals')}</span>
       <p class="muted" style="margin:4px 0 8px;font-size:13px">${t('Money you took out of your TFSA. It comes back as room on January 1 of the next year. Selling inside the TFSA is not a withdrawal.')}</p>
       ${ws.length ? `<div class="stack" style="gap:4px">${ws.map((w, i) => `<div class="bill-top"><span>${esc(dfmt(w.date))}</span><b class="mono">${money0(+w.amount)}</b><button class="x" data-act="tfsa-wdel" data-i="${i}" aria-label="${esc(t('Remove'))}">×</button></div>`).join('')}</div>` : ''}
@@ -1404,14 +1678,29 @@ function tfsaSettings() {
   </div></section>`;
 }
 function wireTfsaSettings() {
+  const future = () => Math.max(0, +$('#tf-future').value || 7000);
+  $$('[data-tfmode]').forEach(b => b.addEventListener('click', () => {
+    $$('[data-tfmode]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    $('#tfsa-bform').hidden = b.dataset.tfmode !== 'birth'; $('#tfsa-form').hidden = b.dataset.tfmode !== 'cra';
+  }));
+  $('#tfsa-bform')?.addEventListener('submit', ev => {
+    ev.preventDefault();
+    const y = +E.today().slice(0, 4), birth = parseInt($('#tf-birth').value, 10), res = parseInt($('#tf-res').value, 10);
+    if (!(birth >= 1900 && birth <= y - 18)) { toast(t('Enter the year you were born. You need to be 18 or older to have a TFSA.')); return; }
+    const prev = S.pf.settings.tfsa || {};
+    const { room, asOf, setAt, ...keep } = prev;
+    S.pf.settings.tfsa = { ...keep, birth, resident: res >= 2009 && res <= y ? res : undefined, other: Math.max(0, +$('#tf-other').value || 0), future: future() };
+    persist(); toast(t('TFSA room worked out')); viewSettings();
+  });
   $('#tfsa-form')?.addEventListener('submit', ev => {
     ev.preventDefault();
     const room = parseFloat($('#tf-room').value);
     if (!(room >= 0)) { toast(t('Enter your TFSA room.')); return; }
-    const prev = S.pf.settings.tfsa || {};
-    S.pf.settings.tfsa = { ...prev, room, asOf: $('#tf-asof').value || E.today(), future: Math.max(0, +$('#tf-future').value || 7000), setAt: Date.now() };
+    const { birth, resident, other, ...prev } = S.pf.settings.tfsa || {};
+    S.pf.settings.tfsa = { ...prev, room, asOf: $('#tf-asof').value || E.today(), future: future(), setAt: Date.now() };
     persist(); toast(t('TFSA room saved')); viewSettings();
   });
+  $('#tf-future')?.addEventListener('change', () => { if (S.pf.settings.tfsa) { S.pf.settings.tfsa.future = future(); persist(); viewSettings(); } });
   $('#tfsa-wform')?.addEventListener('submit', ev => {
     ev.preventDefault();
     const amt = parseFloat($('#tw-amt').value), date = $('#tw-date').value;

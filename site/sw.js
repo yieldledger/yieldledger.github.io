@@ -1,8 +1,8 @@
 // Offline shell for the installed app. Code and styles: show the cached copy at once and refresh it in
 // the background. Market data: always try the network first, fall back to the last copy when offline.
-const CACHE = 'yl-v1';
+const CACHE = 'yl-v2';
 const SHELL = ['./', 'index.html', 'css/app.css', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png',
-  'js/app.js', 'js/auth.js', 'js/charts.js', 'js/data.js', 'js/engine.js', 'js/fr.js', 'js/i18n.js', 'js/importer.js'];
+  'js/app.js', 'js/auth.js', 'js/charts.js', 'js/data.js', 'js/engine.js', 'js/fr.js', 'js/i18n.js', 'js/importer.js', 'js/help.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
