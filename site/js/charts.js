@@ -46,8 +46,8 @@ export function lineChart(el, opts) {
     const H = opts.height || (W < 520 ? 210 : 260);
     const pl = W < 520 ? 46 : 56, pr = 10, pt = 14, pb = 26, iw = W - pl - pr, ih = H - pt - pb;
     const all = opts.series.flatMap(s => s.v).filter(Number.isFinite);
-    const min = Math.min(0, ...all), max = Math.max(...all, opts.floor ?? 1);
-    const ticks = niceTicks(min, max * 1.04);
+    const min = opts.zero === false ? Math.min(...all) * 0.98 : Math.min(0, ...all), max = Math.max(...all, opts.zero === false ? -Infinity : opts.floor ?? 1);
+    const ticks = niceTicks(min, opts.zero === false ? max * 1.01 : max * 1.04);
     const y0 = ticks[0], y1 = ticks[ticks.length - 1];
     const n = opts.x.length;
     const X = i => pl + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw), Y = v => pt + ih - ((v - y0) / (y1 - y0)) * ih;

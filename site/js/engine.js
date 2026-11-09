@@ -68,6 +68,24 @@ function splitFactorAfter(q, iso) {
 }
 
 /**
+ * Total paid for a lot, in the security's own currency. "Amount paid" means the whole purchase, but people
+ * often type the price of one share there. When the amount is close to one share's price on that day and far
+ * below shares × price, it is read as a price per share. A lot saved with costMode 'each' is always per share.
+ */
+export function lotAmount(l, q) {
+  const n = Math.abs(+l.shares), f = splitFactorAfter(q, l.date);
+  const px = priceOn(q.c, l.date), sh = n * f;
+  const c = +l.cost;
+  if (!(Number.isFinite(c) && c > 0)) return sh * px;
+  if (l.costMode === 'each') return c * n;
+  if (l.costMode === 'total') return c;
+  const raw = px * f; // price per share as quoted on the day, before later splits
+  if (n >= 3 && raw > 0 && c / n < raw * 0.35 && c > raw * 0.4 && c < raw * 2.5) return c * n;
+  return c;
+}
+export const lotReadAsEach = (l, q) => +l.cost > 0 && l.costMode !== 'each' && Math.abs(lotAmount(l, q) - +l.cost) > 1e-9;
+
+/**
  * Replay one position: each buy, each dividend, each DRIP purchase.
  * pos: { sym, account, drip: 'frac'|'whole'|'off', lots: [{ id, date, shares, cost? }] }
  * q: security record from data/q. fx: USDCAD series or null.
@@ -83,7 +101,7 @@ export function simulate(pos, q, fx, asOf = today()) {
     const px = priceOn(q.c, l.date);
     if (l.frac) { events.push({ t: 'sell', date: l.date, frac: +l.frac, lot: l }); continue; }
     const sh = Math.abs(+l.shares) * f;
-    const amt = Number.isFinite(+l.cost) && +l.cost > 0 ? +l.cost : sh * px;
+    const amt = lotAmount(l, q);
     events.push({ t: +l.shares > 0 ? 'buy' : 'sell', date: l.date, shares: sh, cost: amt, lot: l });
   }
   const firstDate = lots.length ? lots[0].date : asOf;
@@ -549,10 +567,18 @@ export const tfsaLimit = (y, future = 7000) => TFSA_LIMITS[y] ?? future;
  * buying with cash already inside the TFSA don't use room, so a purchase can be marked as not new money.
  */
 export function tfsaRoom(cfg, positions, quotes, fx, asOf = today()) {
-  if (!cfg || !Number.isFinite(+cfg.room) || !cfg.asOf) return null;
-  const y0 = +cfg.asOf.slice(0, 4), y1 = +asOf.slice(0, 4), future = +cfg.future || 7000;
-  let added = 0;
-  for (let y = y0 + 1; y <= y1; y++) added += tfsaLimit(y, future);
+  if (!cfg) return null;
+  const y1 = +asOf.slice(0, 4), future = +cfg.future || 7000;
+  let added = 0, start = null;
+  if (cfg.birth) {
+    // CRA: room builds from the year you turn 18 (or 2009, whichever is later), as a resident of Canada.
+    start = Math.max(2009, +cfg.birth + 18, +cfg.resident || 0);
+    for (let y = start; y <= y1; y++) added += tfsaLimit(y, future);
+    cfg = { ...cfg, room: -(+cfg.other || 0), asOf: '0000-01-01' };
+  } else {
+    if (!Number.isFinite(+cfg.room) || !cfg.asOf) return null;
+    for (let y = +cfg.asOf.slice(0, 4) + 1; y <= y1; y++) added += tfsaLimit(y, future);
+  }
   let back = 0;
   for (const w of cfg.withdrawals || []) if (w.date >= cfg.asOf && +w.date.slice(0, 4) + 1 <= y1) back += +w.amount || 0;
   const pending = (cfg.withdrawals || []).filter(w => +w.date.slice(0, 4) === y1).reduce((t, w) => t + (+w.amount || 0), 0);
@@ -566,11 +592,123 @@ export function tfsaRoom(cfg, positions, quotes, fx, asOf = today()) {
       const counts = l.date > cfg.asOf || (l.date === cfg.asOf && l.addedAt && cfg.setAt && l.addedAt >= cfg.setAt);
       if (!counts) continue;
       const cur = q?.cur || 'CAD';
-      const native = +l.cost > 0 ? +l.cost : q ? +l.shares * priceOn(q.c, l.date) : NaN;
+      const native = q ? lotAmount(l, q) : +l.cost > 0 ? +l.cost : NaN;
       const cad = native * fxOn(fx, l.date, cur);
       if (Number.isFinite(cad)) { used += cad; items.push({ sym: p.sym, date: l.date, cad }); }
     }
   }
   const left = +cfg.room + added + back - used;
-  return { left, used, added, back, pending, items, next: { year: y1 + 1, amount: tfsaLimit(y1 + 1, future) + pending } };
+  return { left, used, added, back, pending, items, start, other: +cfg.other || 0, next: { year: y1 + 1, amount: tfsaLimit(y1 + 1, future) + pending } };
+}
+
+/* ------------------------------------------------------------ technical analysis */
+const smaAt = (v, n, i) => { if (i + 1 < n) return NaN; let s = 0; for (let k = i - n + 1; k <= i; k++) s += v[k]; return s / n; };
+function emaSeries(v, n) {
+  const k = 2 / (n + 1), out = [];
+  let e = NaN;
+  for (let i = 0; i < v.length; i++) {
+    if (i + 1 === n) e = smaAt(v, n, i); else if (i + 1 > n) e = v[i] * k + e * (1 - k);
+    out.push(e);
+  }
+  return out;
+}
+function rsiSeries(v, n = 14) {
+  const out = new Array(v.length).fill(NaN);
+  let g = 0, l = 0;
+  for (let i = 1; i < v.length; i++) {
+    const d = v[i] - v[i - 1], up = Math.max(d, 0), dn = Math.max(-d, 0);
+    if (i <= n) { g += up; l += dn; if (i === n) { g /= n; l /= n; out[i] = l ? 100 - 100 / (1 + g / l) : 100; } continue; }
+    g = (g * (n - 1) + up) / n; l = (l * (n - 1) + dn) / n;
+    out[i] = l ? 100 - 100 / (1 + g / l) : 100;
+  }
+  return out;
+}
+/**
+ * Basic technical read from daily closes (the data keeps three years of daily prices).
+ * Moving averages, RSI, MACD, 52-week range, nearby support and resistance, and a plain-language trend.
+ */
+export function technicals(q) {
+  if (!q?.c?.d?.length) return null;
+  const cut = addDays(q.c.d[q.c.d.length - 1], -1100);
+  const i0 = Math.max(0, firstIndexOnOrAfter(q.c.d, cut));
+  const d = q.c.d.slice(i0), v = q.c.v.slice(i0);
+  const n = v.length;
+  if (n < 60) return null;
+  const last = n - 1, px = v[last];
+  const sma50 = smaAt(v, 50, last), sma200 = smaAt(v, 200, last), sma20 = smaAt(v, 20, last);
+  const sma50Prev = smaAt(v, 50, last - 20), sma200Prev = smaAt(v, 200, last - 20);
+  const rsiS = rsiSeries(v), rsi = rsiS[last];
+  const e12 = emaSeries(v, 12), e26 = emaSeries(v, 26);
+  const macdS = v.map((_, i) => e12[i] - e26[i]);
+  const sigS = emaSeries(macdS.map(x => (Number.isFinite(x) ? x : 0)), 9).map((x, i) => (i < 34 ? NaN : x));
+  const macd = macdS[last], signal = sigS[last], hist = macd - signal;
+  let macdCross = null;
+  for (let i = last; i > last - 10 && i > 35; i--) {
+    const a = macdS[i] - sigS[i], b = macdS[i - 1] - sigS[i - 1];
+    if (a > 0 && b <= 0) { macdCross = { dir: 'up', date: d[i] }; break; }
+    if (a < 0 && b >= 0) { macdCross = { dir: 'down', date: d[i] }; break; }
+  }
+  // Golden or death cross of the 50 and 200-day averages in the last 60 trading days.
+  let maCross = null;
+  if (n >= 262) for (let i = last; i > last - 60; i--) {
+    const a = smaAt(v, 50, i) - smaAt(v, 200, i), b = smaAt(v, 50, i - 1) - smaAt(v, 200, i - 1);
+    if (a > 0 && b <= 0) { maCross = { dir: 'golden', date: d[i] }; break; }
+    if (a < 0 && b >= 0) { maCross = { dir: 'death', date: d[i] }; break; }
+  }
+  const yr = v.slice(Math.max(0, n - 252));
+  const lo52 = Math.min(...yr), hi52 = Math.max(...yr);
+  const pos52 = hi52 > lo52 ? (px - lo52) / (hi52 - lo52) : 0.5;
+  // Pivots over the last ~6 months: a close that is the lowest (or highest) of the 5 days either side.
+  const w = 5, lows = [], highs = [];
+  for (let i = Math.max(w, n - 130); i < n - w; i++) {
+    const win = v.slice(i - w, i + w + 1);
+    if (v[i] === Math.min(...win)) lows.push(v[i]);
+    if (v[i] === Math.max(...win)) highs.push(v[i]);
+  }
+  const below = lows.filter(x => x < px * 0.995), above = highs.filter(x => x > px * 1.005);
+  const recent = v.slice(Math.max(0, n - 60));
+  const support = below.length ? Math.max(...below) : Math.min(...recent) < px * 0.995 ? Math.min(...recent) : lo52 < px * 0.995 ? lo52 : null;
+  const resistance = above.length ? Math.min(...above) : Math.max(...recent) > px * 1.005 ? Math.max(...recent) : null;
+  const chg = k => (n > k ? px / v[last - k] - 1 : NaN);
+  let trend;
+  if (Number.isFinite(sma200)) {
+    if (px > sma50 && sma50 > sma200) trend = 'up';
+    else if (px < sma50 && sma50 < sma200) trend = 'down';
+    else if (px > sma200) trend = 'up-weak';
+    else trend = 'down-weak';
+  } else trend = px > sma50 ? 'up-weak' : 'down-weak';
+  let score = 0;
+  if (Number.isFinite(sma50)) score += px > sma50 ? 1 : -1;
+  if (Number.isFinite(sma200)) score += px > sma200 ? 1 : -1;
+  if (Number.isFinite(sma50Prev)) score += sma50 > sma50Prev ? 1 : -1;
+  if (Number.isFinite(hist)) score += hist > 0 ? 1 : -1;
+  if (rsi > 70) score -= 1; else if (rsi < 30) score += 1;
+  const lean = score >= 2 ? 'bull' : score <= -2 ? 'bear' : 'neutral';
+  const k = Math.max(0, n - 260);
+  const series = { d: d.slice(k), px: v.slice(k), sma50: v.map((_, i) => smaAt(v, 50, i)).slice(k), sma200: v.map((_, i) => smaAt(v, 200, i)).slice(k), rsi: rsiS.slice(k) };
+  return { px, sma20, sma50, sma200, sma50Prev, sma200Prev, rsi, macd, signal, hist, macdCross, maCross, lo52, hi52, pos52, support, resistance, chg1m: chg(21), chg3m: chg(63), chg6m: chg(126), trend, score, lean, series, asof: d[last] };
+}
+
+/* ------------------------------------------------------------ payout-change alerts */
+/** Forward yearly payout per share from an index row (forward yield × price). */
+export const rowPayout = r => (r && Number.isFinite(r.fy) && Number.isFinite(r.px) ? r.fy * r.px : null);
+/**
+ * Compare each followed security's payout with the last one the person saw.
+ * seen: { sym: { p: payout per share, y: yield, at: iso } }. Returns changes of 1% or more.
+ */
+export function payoutChanges(syms, rows, seen, minChg = 0.01) {
+  const out = [];
+  for (const s of new Set(syms)) {
+    const r = rows.find(x => x.s === s), was = seen?.[s];
+    const p = rowPayout(r);
+    if (!r || !was || !(p > 0) || !(was.p > 0)) continue;
+    const chg = p / was.p - 1;
+    if (Math.abs(chg) >= minChg) out.push({ s, d: r.d, n: r.n, from: was.p, to: p, chg, yFrom: was.y, yTo: r.fy, since: was.at, cur: r.cur });
+  }
+  return out.sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg));
+}
+export function snapshotPayouts(syms, rows, seen = {}, asOf = today()) {
+  const out = { ...seen };
+  for (const s of new Set(syms)) { const r = rows.find(x => x.s === s), p = rowPayout(r); if (p > 0) out[s] = { p, y: r.fy, at: asOf }; }
+  return out;
 }
