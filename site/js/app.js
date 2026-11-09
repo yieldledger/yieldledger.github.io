@@ -1763,6 +1763,12 @@ function openFeedback() {
 let installEvt = null;
 const standalone = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (location.hash === '#/settings') route(); });
-if ('serviceWorker' in navigator && location.protocol === 'https:') window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  // When a new version takes over, reload once so the page runs the new code.
+  const had = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !reloaded) { reloaded = true; location.reload(); } });
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));
+}
 
 boot().catch(e => { console.error(e); $('#app').innerHTML = `<div class="loading">${t('Yield Ledger could not start: {e}. Reload the page to try again.', { e: esc(e.message) })}</div>`; });
