@@ -1206,7 +1206,7 @@ function viewAdd() {
   <div class="panel" data-p="one"><form id="one-form" class="form-grid" novalidate>
     <div class="field wide ac"><label for="o-sym">${H('Ticker')}</label><input id="o-sym" autocomplete="off" autocapitalize="characters" placeholder="VDY, XEI, SCHD…" value="${esc(pre ? pre.d : prefill)}"><div class="ac-list" id="o-ac" hidden></div><span class="hint" id="o-pick">${pre ? esc(pre.n) : t('Start typing and pick from the list.')}</span></div>
     <div class="field"><label for="o-sh">${H('Shares')}</label><input id="o-sh" type="number" step="any" min="0" inputmode="decimal"></div>
-    <div class="field"><label for="o-date">${H('Date bought')}</label><input id="o-date" type="date" max="${E.today()}" value="${E.addDays(E.today(), -365)}"></div>
+    <div class="field"><label for="o-date">${H('Date bought')}</label><input id="o-date" type="date" max="${E.today()}" value="${E.today()}"></div>
     <div class="field"><label for="o-acct">${H('Account')}</label>${ACCT('o-acct', st.account)}</div>
     <div class="field"><label for="o-drip">${H('Dividends')}</label><select id="o-drip">${Object.entries(DRIP()).map(([k, l]) => `<option value="${k}" ${k === st.drip ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="field wide tfsa-new" id="o-tfsa" hidden><label class="check-inline"><input type="checkbox" id="o-new" checked> ${t('New money deposited into the TFSA (uses contribution room)')}</label><span class="hint" id="o-room"></span></div>
